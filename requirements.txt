@@ -1,0 +1,8 @@
+pydantic
+sentence-transformers
+structlog
+asyncio
+numpy
+faiss-cpu
+openrouter
+google
