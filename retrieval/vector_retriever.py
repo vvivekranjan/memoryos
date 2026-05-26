@@ -2,19 +2,23 @@ from __future__ import annotations
 
 from vector.embedder import Embedder
 from storage.faiss_store import FAISSStore, SearchResult
+from storage.orchestrator import StorageOrchestrator
 from typing import List, Dict, Any
+from uuid import UUID
 import asyncio
 
 class VectorRetriever:
-    """Handles query-based retrieval from the vector store"""
+    """Handles query-based retrieval from the vector store and orchestrator"""
 
     def __init__(
         self,
         faiss_store: FAISSStore,
+        orchestrator: StorageOrchestrator,
         embedder: Embedder,
     ):
         
         self.faiss_store = faiss_store
+        self.orchestrator = orchestrator
         self.embedder = embedder
     
     def retrieve(
@@ -59,9 +63,24 @@ class VectorRetriever:
                 query_embedding=query_embedding.tolist(), top_k=top_k
             )
 
-            filtered_results: List[Dict[str, Any]] = [
-                result for result in results if result["score"] >= score_threshold
-            ]
+            filtered_results: List[Dict[str, Any]] = []
+            for result in results:
+                if result["score"] >= score_threshold:
+                    try:
+                        mem_id_str = result["metadata"].get("memory_id")
+                        if mem_id_str:
+                            mem = self.orchestrator.retrieve_memory(UUID(mem_id_str))
+                            filtered_results.append({
+                                "score": result["score"],
+                                "metadata": {
+                                    "memory_id": str(mem.memory_id),
+                                    "content": mem.content,
+                                    "agent_id": mem.agent_id,
+                                    "memory_type": str(mem.memory_type),
+                                }
+                            })
+                    except Exception as exc:
+                        print(f"Failed to retrieve {result['metadata'].get('memory_id')}: {exc}")
 
             return filtered_results
 

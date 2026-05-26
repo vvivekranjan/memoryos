@@ -5,4 +5,8 @@ asyncio
 numpy
 faiss-cpu
 openrouter
-google
+pydantic
+pydantic-settings
+duckdb
+kuzu
+orjson
