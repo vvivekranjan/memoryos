@@ -183,7 +183,7 @@ def main() -> None:
 
         retrieval_results = memory.retrieve(
             query=user,
-            top_k=3,
+            top_k=10,
             score_threshold=0.1,
         )
         context = format_context(retrieval_results)

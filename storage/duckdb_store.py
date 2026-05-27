@@ -491,7 +491,7 @@ class DuckDBStore:
                 UPDATE memories
                 SET
                     access_count = access_count + 1,
-                    last_accessed_at = ?,
+                    last_accessed_at = ?
                 WHERE memory_id = ?
                 """,
                 [
