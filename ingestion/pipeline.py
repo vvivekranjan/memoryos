@@ -1,17 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from typing import Any
-
-from memory.models import BaseMemory, MemoryTypeEnum, EpisodicMemory, WorkingMemory, SpeakerRoleEnum
-from vector.embedder import Embedder
-from ingestion.chunker import Chunker, Chunk
-from ingestion.deduplicator import Deduplicator
-from storage.orchestrator import StorageOrchestrator
-
 import asyncio
 import hashlib
+from dataclasses import asdict, dataclass
+from typing import Any
 from uuid import UUID, uuid4
+
+from ingestion.pdf_loader import PDFLoader
+from ingestion.preprocessor import Preprocessor
+from memory.models import (
+    BaseMemory,
+    EpisodicMemory,
+    MemoryTypeEnum,
+    SpeakerRoleEnum,
+    WorkingMemory,
+)
+from vector.embedder import Embedder
+from ingestion.chunker import Chunker, Chunk
+from ingestion.deduplicator import DedupStore, Deduplicator
+from storage.orchestrator import StorageOrchestrator
 
 @dataclass(slots=True)
 class IngestionRequest:
@@ -22,11 +29,17 @@ class IngestionRequest:
     document_id: str
     content: str
     agent_id: str = "default_agent"
-    memory_type: MemoryTypeEnum = MemoryTypeEnum.EPISODIC
+    memory_type: MemoryTypeEnum | str = MemoryTypeEnum.EPISODIC
     importance_score: float = 0.5
-    session_id: str | None = None
+    session_id: UUID | str | None = None
     turn_index: int = 0
-    speaker_role: str = "USER"
+    speaker_role: SpeakerRoleEnum | str = SpeakerRoleEnum.USER
+    referenced_memory_ids: list[UUID | str] | None = None
+    is_system_message: bool = False
+    tool_call_id: str | None = None
+    ttl_seconds: int = 3600
+    promoted_to: UUID | str | None = None
+    scratch_data: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
 def _content_sha256(content: str) -> str:
@@ -59,16 +72,20 @@ class Pipeline:
 
     def __init__(
         self,
-        deduplicator: Deduplicator,
-        chunker: Chunker,
-        embedder: Embedder,
+        *,
         orchestrator: StorageOrchestrator,
+        preprocessor: Preprocessor | None = None,
+        deduplicator: Deduplicator | None = None,
+        chunker: Chunker | None = None,
+        embedder: Embedder | None = None,
     ):
         
-        self.deduplicator = deduplicator
-        self.chunker = chunker
-        self.embedder = embedder
+        self.pdf_loader = PDFLoader()
+        self.preprocessor = preprocessor or Preprocessor()
+        self.chunker = chunker or Chunker()
+        self.embedder = embedder or Embedder()
         self.orchestrator = orchestrator
+        self.deduplicator = deduplicator or Deduplicator(store=orchestrator.duckdb)
     
     async def ingest_document(
         self,
@@ -77,17 +94,19 @@ class Pipeline:
     ) -> dict[str, Any]:
         """Chunks a document, embeds chunks, and inserts them into the vector store."""
 
-        dedup_result = (
-                await self.deduplicator.check_content(
-                    agent_id=request.agent_id,
-                    content=request.content,
-                )
-            )
+        text = await self.router.route_and_extract(request.content)
+
+        clean_text = await self.preprocessor.clean(text)
+
+        dedup_result = await self.deduplicator.check_content(
+            agent_id=request.agent_id,
+            content=clean_text,
+        )
         
         if dedup_result.is_duplicate:
             return
 
-        chunking_result = self.chunker.chunk(request.content)
+        chunking_result = self.chunker.chunk(clean_text)
         chunk_texts = [chunk.content for chunk in chunking_result.chunks]
         # Generate embeddings asynchronously (may offload to thread inside Embedder)
         embeddings = await self.embedder.generate_embeddings(chunk_texts)
@@ -137,9 +156,11 @@ class Pipeline:
         }
 
         memory_id_val = uuid4()
-        session_id_val = uuid4() if not request.session_id else UUID(request.session_id)
+        session_id_val = _coerce_uuid(request.session_id) if request.session_id else uuid4()
+        memory_type = _coerce_memory_type(request.memory_type)
+        speaker_role = _coerce_speaker_role(request.speaker_role)
 
-        if request.memory_type == MemoryTypeEnum.WORKING:
+        if memory_type == MemoryTypeEnum.WORKING:
             return WorkingMemory(
                 memory_id=memory_id_val,
                 agent_id=request.agent_id,
@@ -148,7 +169,9 @@ class Pipeline:
                 importance_score=request.importance_score,
                 session_id=session_id_val,
                 metadata=metadata,
-                ttl_seconds=3600,
+                ttl_seconds=request.ttl_seconds,
+                promoted_to=_coerce_uuid(request.promoted_to) if request.promoted_to else None,
+                scratch_data=request.scratch_data or {},
             )
         else:
             return EpisodicMemory(
@@ -159,11 +182,36 @@ class Pipeline:
                 importance_score=request.importance_score,
                 session_id=session_id_val,
                 turn_index=request.turn_index,
-                speaker_role=request.speaker_role,
+                speaker_role=speaker_role,
                 metadata=metadata,
-                is_system_message=False,
-                referenced_memory_ids=[],
+                is_system_message=request.is_system_message,
+                referenced_memory_ids=[
+                    _coerce_uuid(memory_id)
+                    for memory_id in (request.referenced_memory_ids or [])
+                ],
+                tool_call_id=request.tool_call_id,
             )
+
+
+def _coerce_uuid(value: UUID | str) -> UUID:
+    if isinstance(value, UUID):
+        return value
+
+    return UUID(str(value))
+
+
+def _coerce_memory_type(value: MemoryTypeEnum | str) -> MemoryTypeEnum:
+    if isinstance(value, MemoryTypeEnum):
+        return value
+
+    return MemoryTypeEnum(str(value))
+
+
+def _coerce_speaker_role(value: SpeakerRoleEnum | str) -> SpeakerRoleEnum:
+    if isinstance(value, SpeakerRoleEnum):
+        return value
+
+    return SpeakerRoleEnum(str(value))
 
 
 def ingest_document(
@@ -183,7 +231,12 @@ def ingest_document(
     """
 
     request = IngestionRequest(document_id=document_id, content=content, importance_score=importance_score)
-    pipeline = Pipeline(deduplicator=deduplicator, chunker=chunker, embedder=embedder, orchestrator=orchestrator)
+    pipeline = Pipeline(
+        orchestrator=orchestrator,
+        deduplicator=deduplicator,
+        chunker=chunker,
+        embedder=embedder,
+    )
 
     try:
         asyncio.get_running_loop()

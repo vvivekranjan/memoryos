@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from agents.context_builder import (
@@ -28,11 +28,17 @@ from retrieval.engine import (
     RetrievalEngine,
 )
 
+from retrieval.vector_retriever import VectorRetriever
 from vector.embedder import (
     Embedder,
 )
 
+from storage.duckdb_store import DuckDBStore
+from storage.faiss_store import FAISSStore
+from storage.orchestrator import StorageOrchestrator
+
 from retrieval.context_assembler import ContextBlock
+from retrieval.context_assembler import ContextAssembler
 
 @dataclass(slots=True)
 class IngestResult:
@@ -77,24 +83,48 @@ class MemoryClient:
     def __init__(
         self,
         *,
-        ingestion_pipeline: Pipeline,
-        retrieval_engine: RetrievalEngine,
-        context_builder: ContextBuilder,
-        session_manager: SessionManager,
-        embedder: Embedder,
+        agent_id: str = "default",
+        endpoint: str = "local",
+        ingestion_pipeline: Pipeline | None = None,
+        retrieval_engine: RetrievalEngine | None = None,
+        context_builder: ContextBuilder | None = None,
+        session_manager: SessionManager | None = None,
+        embedder: Embedder | None = None,
     ):
-        self.ingestion_pipeline = ingestion_pipeline
-        self.retrieval_engine = retrieval_engine
-        self.context_builder = context_builder
-        self.session_manager = session_manager
-        self.embedder = embedder
+        self.agent_id = agent_id
+        self.endpoint = endpoint
+
+        self.embedder = embedder or Embedder()
+        self.context_builder = context_builder or ContextBuilder()
+        self.session_manager = session_manager or SessionManager()
+
+        self.db_store = DuckDBStore()
+        self.faiss_store = FAISSStore()
+        self.db_store.initialise()
+        self.faiss_store.load()
+
+        self.orchestrator = StorageOrchestrator(
+            duckdb_store=self.db_store,
+            faiss_store=self.faiss_store,
+        )
+
+        self.ingestion = ingestion_pipeline or Pipeline(orchestrator=self.orchestrator)
+        self.retrieval_engine = retrieval_engine or RetrievalEngine(
+            vector_retriever=VectorRetriever(
+                faiss_store=self.faiss_store,
+                orchestrator=self.orchestrator,
+                embedder=self.embedder,
+            ),
+            memory_store=self.db_store,
+            context_assembler=ContextAssembler(),
+        )
 
     async def ingest(
         self,
         *,
-        agent_id: str,
+        agent_id: Optional[str] = None,
         content: str,
-        memory_type: str,
+        memory_type: MemoryTypeEnum | str = MemoryTypeEnum.EPISODIC,
         importance_score: float = 0.5,
         session_id: UUID | None = None,
         turn_index: int = 0,
@@ -116,23 +146,33 @@ class MemoryClient:
 
         # Run the ingestion pipeline. Current Pipeline exposes `ingest_document` and
         # returns a dict on success or `None` when a duplicate is detected.
-        pipeline_result = await self.ingestion_pipeline.ingest_document(
+
+        agent = agent_id or self.agent_id
+        request_document_id = uuid4()
+
+        pipeline_result = await self.ingestion.ingest_document(
             request=IngestionRequest(
-                document_id=str(uuid4()),
+                document_id=str(request_document_id),
                 content=content,
-                agent_id=agent_id,
-                memory_type=MemoryTypeEnum(memory_type),
+                agent_id=agent,
+                memory_type=self._coerce_memory_type(memory_type),
                 importance_score=importance_score,
                 session_id=session_id,
                 turn_index=turn_index,
                 speaker_role=speaker_role,
+                referenced_memory_ids=referenced_memory_ids,
+                is_system_message=is_system_message,
+                tool_call_id=tool_call_id,
+                ttl_seconds=ttl_seconds,
+                promoted_to=promoted_to,
+                scratch_data=scratch_data,
                 metadata=(metadata or {}),
             )
         )
 
         if pipeline_result is None:
             return IngestResult(
-                ingestion_id=uuid4(),
+                ingestion_id=request_document_id,
                 memory_ids=[],
                 chunks_created=0,
                 duplicate_detected=True,
@@ -142,7 +182,7 @@ class MemoryClient:
         memory_ids = [UUID(v) for v in vector_ids]
 
         return IngestResult(
-            ingestion_id=uuid4(),
+            ingestion_id=request_document_id,
             memory_ids=memory_ids,
             chunks_created=pipeline_result.get("total_chunks", len(pipeline_result.get("chunks", []))),
             duplicate_detected=False,
@@ -151,7 +191,7 @@ class MemoryClient:
     async def retrieve(
         self,
         *,
-        agent_id: str,
+        agent_id: Optional[str] = None,
         query: str,
         top_k: int = 10,
         min_score: (
@@ -205,6 +245,13 @@ class MemoryClient:
             values = [values]
 
         return [MemoryTypeEnum(value) for value in values]
+
+    @staticmethod
+    def _coerce_memory_type(value: MemoryTypeEnum | str) -> MemoryTypeEnum:
+        if isinstance(value, MemoryTypeEnum):
+            return value
+
+        return MemoryTypeEnum(str(value))
 
     @staticmethod
     def _build_context_block(
@@ -317,4 +364,12 @@ class MemoryClient:
         """
 
         self.session_manager.close_session(session_id=session_id)
+    
+    async def forget(
+        self,
+        *,
+        memory_id: str,
+    ) -> None:
+        """Remove a memory."""
+        pass
 

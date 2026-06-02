@@ -101,6 +101,8 @@ class Deduplicator:
         if not isinstance(content, str):
             content = str(content)
 
+        content = content.strip()
+
         encoded = content.encode("utf-8")
 
         return hashlib.sha256(

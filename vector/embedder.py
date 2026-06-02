@@ -5,6 +5,7 @@ from typing import List
 
 import numpy as np
 import asyncio
+from utils.logger import get_logger
 
 DEFAULT_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
@@ -39,22 +40,23 @@ class Embedder:
         self.model_name = model_name
         self.model = None
         self.embedding_dimension = DEFAULT_DIMENSION
-        self._load_model()
+        self._logger = get_logger(__name__, subsystem="vector.embedder")
+        # defer heavy model loading until needed
     
     def _load_model(self):
         """Load the Sentence Transformer Model"""
 
         try:
-            print(f"Loading embedding Model: {self.model_name}")
+            self._logger.info("loading model", extra={"model_name": self.model_name})
             self.model = SentenceTransformer(self.model_name)
             try:
                 dimension = self.model.get_embedding_dimension()
             except Exception:
                 dimension = getattr(self.model, "get_embedding_dimension", lambda: DEFAULT_DIMENSION)()
             self.embedding_dimension = int(dimension)
-            print(f"Model loaded successfully. Embedding dimension: {self.embedding_dimension}")
+            self._logger.info("model loaded", extra={"embedding_dimension": self.embedding_dimension})
         except Exception as e:
-            print(f"Error loading model {self.model_name}: {e}")
+            self._logger.exception("error loading model", extra={"model_name": self.model_name})
             raise
     
     async def generate_embeddings(self, texts: List[str]) -> np.ndarray:
@@ -71,7 +73,11 @@ class Embedder:
             self._validate_text(text)
 
         if not self.model:
-            raise ValueError("Model not loaded")
+            # Lazy-load the model on first use
+            try:
+                self._load_model()
+            except Exception as exc:
+                raise ValueError("Model not available") from exc
 
         # Offload the blocking model.encode call to a thread.
         vectors = await asyncio.to_thread(

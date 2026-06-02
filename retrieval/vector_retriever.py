@@ -8,6 +8,7 @@ from uuid import UUID
 from storage.faiss_store import FAISSStore, SearchResult
 from storage.orchestrator import StorageOrchestrator
 from vector.embedder import Embedder
+from utils.logger import get_logger
 
 
 @dataclass(slots=True)
@@ -29,6 +30,7 @@ class VectorRetriever:
         self.faiss_store = faiss_store
         self.orchestrator = orchestrator
         self.embedder = embedder
+        self._logger = get_logger(__name__, subsystem="retrieval.vector_retriever")
 
     def search(
         self,
@@ -165,5 +167,5 @@ class VectorRetriever:
             return filtered_results
 
         except Exception as exc:
-            print(f"Error during retrieval: {exc}")
+            self._logger.exception("error during retrieval", extra={"error": str(exc)})
             return []

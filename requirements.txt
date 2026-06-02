@@ -11,3 +11,4 @@ duckdb
 kuzu
 orjson
 pytest
+pymupdf

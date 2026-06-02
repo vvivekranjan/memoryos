@@ -6,12 +6,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from agents.memory_client import MemoryClient
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from openrouter import OpenRouter
 from main import Memory
+from utils.logger import get_logger
 
 
 def _load_env_file(env_path: Path) -> None:
@@ -190,7 +193,10 @@ def main() -> None:
 
         try:
             answer = ask_llm(client, user_prompt=user, context=context)
+            # UX: print to console for interactive users
             print("AI:", answer)
+            # Structured log for observability
+            get_logger(__name__, subsystem="app.cli").info("ai.response", extra={"answer": answer})
             turn_index += 1
             _remember_turn(
                 memory,
@@ -199,6 +205,7 @@ def main() -> None:
                 assistant_reply=answer,
             )
         except Exception as exc:
+            get_logger(__name__, subsystem="app.cli").exception("ai.error", exc=exc)
             print(f"AI error: {exc}")
 
 
