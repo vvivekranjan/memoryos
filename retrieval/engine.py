@@ -20,6 +20,16 @@ from retrieval.vector_retriever import (
     VectorRetriever,
 )
 
+
+class GraphStore(Protocol):
+    async def bfs_traversal_async(
+        self,
+        seeds: list[str],
+        max_hops: int = 2,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        ...
+
 @dataclass(slots=True)
 class RetrievalTrace:
     """
@@ -102,10 +112,12 @@ class RetrievalEngine:
         vector_retriever: VectorRetriever,
         memory_store: MemoryStore,
         context_assembler: ContextAssembler
+        , graph_store: GraphStore | None = None
     ):
         self.vector_retriever = vector_retriever
         self.memory_store = memory_store
         self.context_assembler = context_assembler
+        self.graph_store = graph_store
     
     async def retrieve(
         self,
@@ -170,6 +182,20 @@ class RetrievalEngine:
             memory_types=memory_types,
             min_importance=min_importance,
         )
+
+        graph_candidates: list[MemoryResult] = []
+        if self.graph_store is not None and results:
+            graph_candidates = await self._expand_graph_candidates(
+                agent_id=agent_id,
+                vector_results=results,
+                memory_types=memory_types,
+                min_importance=min_importance,
+                top_k=top_k,
+            )
+
+        if graph_candidates:
+            retriever_names.append("graph")
+            results = self._merge_results(results, graph_candidates)
 
         if not results:
             latency_ms = (
@@ -282,6 +308,141 @@ class RetrievalEngine:
             )
 
         return results
+
+    async def _expand_graph_candidates(
+        self,
+        *,
+        agent_id: str,
+        vector_results: list[MemoryResult],
+        memory_types: list[MemoryTypeEnum] | None,
+        min_importance: float,
+        top_k: int,
+    ) -> list[MemoryResult]:
+        seeds = [str(result.memory.memory_id) for result in vector_results[: max(1, min(3, len(vector_results)))]]
+        if not seeds:
+            return []
+
+        traversed = await self.graph_store.bfs_traversal_async(
+            seeds=seeds,
+            max_hops=2,
+            limit=max(10, top_k * 4),
+        )
+
+        if not traversed:
+            return []
+
+        vector_scores = {
+            str(result.memory.memory_id): result.trace.final_score
+            for result in vector_results
+        }
+
+        graph_scores: dict[str, tuple[float, dict[str, Any]]] = {}
+        for edge in traversed:
+            target = edge.get("target")
+            if not target:
+                continue
+
+            source = edge.get("source")
+            hop = int(edge.get("hop") or 1)
+            source_score = vector_scores.get(str(source), 0.0)
+            graph_score = source_score * (0.85 ** max(0, hop - 1))
+
+            existing = graph_scores.get(str(target))
+            if existing is None or graph_score > existing[0]:
+                graph_scores[str(target)] = (
+                    graph_score,
+                    {
+                        "source": str(source) if source is not None else None,
+                        "target": str(target),
+                        "relation": edge.get("relation"),
+                        "hop": hop,
+                    },
+                )
+
+        graph_memory_ids = [UUID(memory_id) for memory_id in graph_scores.keys()]
+        if not graph_memory_ids:
+            return []
+
+        graph_memories = await self.memory_store.get_memories_by_ids(
+            agent_id=agent_id,
+            memory_ids=graph_memory_ids,
+        )
+
+        memory_map = {memory.memory_id: memory for memory in graph_memories}
+        allowed_memory_types = self._normalise_memory_types(memory_types)
+
+        graph_results: list[MemoryResult] = []
+        for rank, memory_id in enumerate(graph_memory_ids, start=1):
+            memory = memory_map.get(memory_id)
+            if memory is None:
+                continue
+
+            memory_type_value = self._memory_type_value(memory.memory_type)
+            if allowed_memory_types and memory_type_value not in allowed_memory_types:
+                continue
+
+            if memory.importance_score < min_importance:
+                continue
+
+            score, graph_path = graph_scores[str(memory_id)]
+            graph_results.append(
+                MemoryResult(
+                    memory=memory,
+                    trace=RetrievalTrace(
+                        final_score=score,
+                        retrieved_by=["graph"],
+                        graph_rank=rank,
+                        graph_path=[
+                            graph_path["source"],
+                            graph_path["target"],
+                        ] if graph_path.get("source") else [graph_path["target"]],
+                        importance_score=memory.importance_score,
+                        activation_boost=score,
+                        trace_metadata={
+                            "graph_path": graph_path,
+                        },
+                    ),
+                )
+            )
+
+        return graph_results
+
+    @staticmethod
+    def _merge_results(
+        primary: list[MemoryResult],
+        secondary: list[MemoryResult],
+    ) -> list[MemoryResult]:
+        merged: dict[UUID, MemoryResult] = {result.memory.memory_id: result for result in primary}
+
+        for result in secondary:
+            existing = merged.get(result.memory.memory_id)
+            if existing is None:
+                merged[result.memory.memory_id] = result
+                continue
+
+            if result.trace.final_score <= existing.trace.final_score:
+                continue
+
+            merged[result.memory.memory_id] = MemoryResult(
+                memory=existing.memory,
+                trace=RetrievalTrace(
+                    final_score=result.trace.final_score,
+                    retrieved_by=sorted(set(existing.trace.retrieved_by + result.trace.retrieved_by)),
+                    vector_rank=existing.trace.vector_rank,
+                    graph_rank=result.trace.graph_rank,
+                    temporal_rank=existing.trace.temporal_rank,
+                    importance_score=existing.trace.importance_score,
+                    recency_boost=existing.trace.recency_boost,
+                    activation_boost=max(existing.trace.activation_boost, result.trace.activation_boost),
+                    graph_path=result.trace.graph_path or existing.trace.graph_path,
+                    trace_metadata={
+                        **existing.trace.trace_metadata,
+                        **result.trace.trace_metadata,
+                    },
+                ),
+            )
+
+        return list(merged.values())
 
     @staticmethod
     def _normalise_memory_types(

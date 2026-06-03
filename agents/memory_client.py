@@ -35,7 +35,9 @@ from vector.embedder import (
 
 from storage.duckdb_store import DuckDBStore
 from storage.faiss_store import FAISSStore
+from storage.sqlite_log import SQLiteEventLog
 from storage.orchestrator import StorageOrchestrator
+from graph.ontology import KuzuDBStore
 
 from retrieval.context_assembler import ContextBlock
 from retrieval.context_assembler import ContextAssembler
@@ -100,12 +102,16 @@ class MemoryClient:
 
         self.db_store = DuckDBStore()
         self.faiss_store = FAISSStore()
+        self.event_log = SQLiteEventLog()
+        self.graph_store = KuzuDBStore()
         self.db_store.initialise()
         self.faiss_store.load()
 
         self.orchestrator = StorageOrchestrator(
             duckdb_store=self.db_store,
             faiss_store=self.faiss_store,
+            event_log=self.event_log,
+            graph_store=self.graph_store,
         )
 
         self.ingestion = ingestion_pipeline or Pipeline(orchestrator=self.orchestrator)
@@ -117,6 +123,7 @@ class MemoryClient:
             ),
             memory_store=self.db_store,
             context_assembler=ContextAssembler(),
+            graph_store=self.graph_store,
         )
 
     async def ingest(
@@ -170,7 +177,7 @@ class MemoryClient:
             )
         )
 
-        if pipeline_result is None:
+        if not pipeline_result or pipeline_result.get("duplicate_detected"):
             return IngestResult(
                 ingestion_id=request_document_id,
                 memory_ids=[],

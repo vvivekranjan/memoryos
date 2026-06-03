@@ -16,6 +16,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from memory.models import (
     BaseMemory,
     EpisodicMemory,
+    LifecycleStateEnum,
+    ModalityEnum,
+    ProvenanceEnum,
     WorkingMemory,
     MemoryTypeEnum,
     SpeakerRoleEnum,
@@ -51,14 +54,35 @@ CREATE TABLE IF NOT EXISTS memories (
 
     content TEXT NOT NULL,
     sha256 VARCHAR NOT NULL,
+    modality VARCHAR NOT NULL,
+
+    lifecycle_state VARCHAR NOT NULL,
 
     created_at TIMESTAMP NOT NULL,
     last_accessed_at TIMESTAMP NOT NULL,
 
     access_count INTEGER NOT NULL,
 
-    importance_score DOUBLE NOT NULL,
+    decay_anchor TIMESTAMP NOT NULL,
+    decay_multiplier DOUBLE NOT NULL,
 
+    importance_score DOUBLE NOT NULL,
+    salience_score DOUBLE NOT NULL,
+
+    vad_v DOUBLE,
+    vad_a DOUBLE,
+    vad_d DOUBLE,
+
+    emotional_class VARCHAR,
+
+    provenance VARCHAR NOT NULL,
+    provenance_confidence DOUBLE NOT NULL,
+
+    graph_node_id VARCHAR,
+
+    forward_ref UUID,
+
+    tags JSON,
     metadata JSON
 );
 """
@@ -74,6 +98,8 @@ CREATE TABLE IF NOT EXISTS episodic_memories (
     speaker_role VARCHAR NOT NULL,
 
     referenced_memory_ids JSON,
+
+    emotional_snapshot JSON,
 
     is_system_message BOOLEAN NOT NULL,
 
@@ -94,6 +120,50 @@ CREATE TABLE IF NOT EXISTS working_memories (
     scratch_data JSON,
 
     expires_at TIMESTAMP
+);
+"""
+
+CREATE_SEMANTIC_TABLE = """
+CREATE TABLE IF NOT EXISTS semantic_memories (
+    memory_id UUID PRIMARY KEY,
+
+    entity VARCHAR NOT NULL,
+
+    relation VARCHAR NOT NULL,
+
+    object_value VARCHAR NOT NULL,
+
+    confidence DOUBLE NOT NULL,
+
+    entity_type VARCHAR,
+
+    object_type VARCHAR,
+
+    source_url VARCHAR,
+
+    contradicted_by UUID[],
+
+    promoted_from UUID
+);
+"""
+
+CREATE_PROCEDURAL_TABLE = """
+CREATE TABLE IF NOT EXISTS procedural_memories (
+    memory_id UUID PRIMARY KEY,
+
+    trigger_condition TEXT NOT NULL,
+
+    steps TEXT[] NOT NULL,
+
+    success_count INTEGER DEFAULT 0,
+
+    failure_count INTEGER DEFAULT 0,
+
+    avg_exec_time_ms DOUBLE,
+
+    abstracted_from UUID[],
+
+    domain VARCHAR
 );
 """
 
@@ -145,6 +215,10 @@ def json_loads(value: str | dict | list | None):
 def coerce_uuid(value: UUID | str) -> UUID:
     return value if isinstance(value, UUID) else UUID(value)
 
+
+def enum_value(value):
+    return value.value if hasattr(value, "value") else value
+
 class DuckDBStore:
     """
     Materialized memory state store.
@@ -193,6 +267,8 @@ class DuckDBStore:
             conn.execute(CREATE_MEMORIES_TABLE)
             conn.execute(CREATE_EPISODIC_TABLE)
             conn.execute(CREATE_WORKING_TABLE)
+            conn.execute(CREATE_SEMANTIC_TABLE)
+            conn.execute(CREATE_PROCEDURAL_TABLE)
 
             conn.execute(CREATE_AGENT_INDEX)
             conn.execute(CREATE_TYPE_INDEX)
@@ -242,39 +318,89 @@ class DuckDBStore:
 
                         content,
                         sha256,
+                        modality,
+
+                        lifecycle_state,
 
                         created_at,
                         last_accessed_at,
 
                         access_count,
 
-                        importance_score,
+                        decay_anchor,
+                        decay_multiplier,
 
+                        importance_score,
+                        salience_score,
+
+                        vad_v,
+                        vad_a,
+                        vad_d,
+
+                        emotional_class,
+
+                        provenance,
+                        provenance_confidence,
+
+                        graph_node_id,
+
+                        forward_ref,
+
+                        tags,
                         metadata
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         str(memory.memory_id),
                         memory.schema_version,
-                        memory.memory_type.value,
+                        enum_value(memory.memory_type),
 
                         memory.agent_id,
 
                         memory.content,
                         memory.sha256,
+                        enum_value(memory.modality),
+
+                        enum_value(memory.lifecycle_state),
 
                         memory.created_at,
                         memory.last_accessed_at,
 
                         memory.access_count,
-                        memory.importance_score,
 
+                        memory.decay_anchor,
+                        memory.decay_multiplier,
+
+                        memory.importance_score,
+                        memory.salience_score,
+
+                        memory.vad_v,
+                        memory.vad_a,
+                        memory.vad_d,
+
+                        memory.emotional_class,
+
+                        enum_value(memory.provenance),
+                        memory.provenance_confidence,
+
+                        memory.graph_node_id,
+
+                        (
+                            str(memory.forward_ref)
+                            if memory.forward_ref
+                            else None
+                        ),
+
+                        json_dumps(memory.tags),
                         json_dumps(memory.metadata),
                     ],
                 )
 
+                # =================================================
                 # Episodic
+                # =================================================
+
                 if isinstance(memory, EpisodicMemory):
 
                     conn.execute(
@@ -285,16 +411,17 @@ class DuckDBStore:
                             turn_index,
                             speaker_role,
                             referenced_memory_ids,
+                            emotional_snapshot,
                             is_system_message,
                             tool_call_id
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
                             str(memory.memory_id),
                             str(memory.session_id),
                             memory.turn_index,
-                            memory.speaker_role.value if hasattr(memory.speaker_role, "value") else str(memory.speaker_role),
+                            enum_value(memory.speaker_role),
 
                             json_dumps(
                                 [
@@ -303,13 +430,22 @@ class DuckDBStore:
                                 ]
                             ),
 
+                            (
+                                json_dumps(memory.emotional_snapshot)
+                                if memory.emotional_snapshot
+                                else None
+                            ),
+
                             memory.is_system_message,
 
                             memory.tool_call_id,
                         ],
                     )
 
+                # =================================================
                 # Working
+                # =================================================
+
                 elif isinstance(memory, WorkingMemory):
 
                     conn.execute(
@@ -365,10 +501,24 @@ class DuckDBStore:
                     agent_id,
                     content,
                     sha256,
+                    modality,
+                    lifecycle_state,
                     created_at,
                     last_accessed_at,
                     access_count,
+                    decay_anchor,
+                    decay_multiplier,
                     importance_score,
+                    salience_score,
+                    vad_v,
+                    vad_a,
+                    vad_d,
+                    emotional_class,
+                    provenance,
+                    provenance_confidence,
+                    graph_node_id,
+                    forward_ref,
+                    tags,
                     metadata
                 FROM memories
                 WHERE memory_id = ?
@@ -389,18 +539,47 @@ class DuckDBStore:
 
                 "content": row[4],
                 "sha256": row[5],
+                "modality": ModalityEnum(row[6]),
 
-                "created_at": row[6],
-                "last_accessed_at": row[7],
+                "lifecycle_state": LifecycleStateEnum(row[7]),
 
-                "access_count": row[8],
+                "created_at": row[8],
+                "last_accessed_at": row[9],
 
-                "importance_score": row[9],
+                "access_count": row[10],
 
-                "metadata": json_loads(row[10]),
+                "decay_anchor": row[11],
+                "decay_multiplier": row[12],
+
+                "importance_score": row[13],
+                "salience_score": row[14],
+
+                "vad_v": row[15],
+                "vad_a": row[16],
+                "vad_d": row[17],
+
+                "emotional_class": row[18],
+
+                "provenance": ProvenanceEnum(row[19]),
+                "provenance_confidence": row[20],
+
+                "graph_node_id": row[21],
+
+                "forward_ref": (
+                    coerce_uuid(row[22])
+                    if row[22]
+                    else None
+                ),
+
+                "tags": json_loads(row[23]),
+
+                "metadata": json_loads(row[24]),
             }
 
+            # =================================================
             # Episodic
+            # =================================================
+
             if row[2] == MemoryTypeEnum.EPISODIC.value:
 
                 ext = conn.execute(
@@ -428,15 +607,24 @@ class DuckDBStore:
                             for x in json_loads(ext[4])
                         ],
 
-                        "is_system_message": ext[5],
+                        "emotional_snapshot": (
+                            json_loads(ext[5])
+                            if ext[5]
+                            else None
+                        ),
 
-                        "tool_call_id": ext[6],
+                        "is_system_message": ext[6],
+
+                        "tool_call_id": ext[7],
                     }
                 )
 
                 return EpisodicMemory(**base_data)
 
+            # =================================================
             # Working
+            # =================================================
+
             elif row[2] == MemoryTypeEnum.WORKING.value:
 
                 ext = conn.execute(
@@ -473,9 +661,11 @@ class DuckDBStore:
 
                 return WorkingMemory(**base_data)
 
-            raise ValueError(
-                f"Unsupported memory type: {row[2]}"
-            )
+            return BaseMemory(**base_data)
+    
+    # ========================================================
+    # ACCESS METADATA
+    # ========================================================
 
     def update_access_metadata(
         self,
@@ -491,14 +681,73 @@ class DuckDBStore:
                 UPDATE memories
                 SET
                     access_count = access_count + 1,
-                    last_accessed_at = ?
+                    last_accessed_at = ?,
+                    decay_anchor = ?
                 WHERE memory_id = ?
                 """,
                 [
                     now,
+                    now,
                     str(memory_id),
                 ],
             )
+    
+    # ========================================================
+    # LIFECYCLE
+    # ========================================================
+
+    def _apply_lifecycle_transition(
+        self,
+        memory_id: UUID,
+        new_state: LifecycleStateEnum,
+    ) -> None:
+        
+        legal = {
+            "ACTIVE": ["STALE"],
+            "STALE": ["ARCHIVED"],
+            "ARCHIVED": ["PRUNED"],
+            "PRUNED": [],
+        }
+
+        with self._connect() as conn:
+
+            row = conn.execute(
+                """
+                SELECT lifecycle_state
+                FROM memories
+                WHERE memory_id = ?
+                """,
+                [str(memory_id)],
+            ).fetchone()
+
+            if row is None:
+                raise MemoryNotFoundError(
+                    f"Memory not found: {memory_id}"
+                )
+
+            current = row[0]
+
+            if new_state.value not in legal[current]:
+                raise InvalidLifecycleTransitionError(
+                    f"Illegal transition "
+                    f"{current} -> {new_state.value}"
+                )
+
+            conn.execute(
+                """
+                UPDATE memories
+                SET lifecycle_state = ?
+                WHERE memory_id = ?
+                """,
+                [
+                    new_state.value,
+                    str(memory_id),
+                ],
+            )
+    
+    # ========================================================
+    # ACTIVE MEMORIES
+    # ========================================================
 
     def get_active_memories(
         self,
@@ -514,6 +763,7 @@ class DuckDBStore:
                 FROM memories
                 WHERE
                     agent_id = ?
+                    AND lifecycle_state = 'ACTIVE'
                 ORDER BY importance_score DESC
                 LIMIT ?
                 """,

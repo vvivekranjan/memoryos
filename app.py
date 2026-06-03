@@ -6,8 +6,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from agents.memory_client import MemoryClient
-
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -38,10 +36,30 @@ _load_env_file(PROJECT_ROOT / ".env")
 
 
 MODEL_NAME = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-SYSTEM_INSTRUCTION = (
-    "You are a helpful assistant. Use the provided context when it is relevant. "
-    "If the context is insufficient, say so briefly and avoid inventing details."
-)
+SYSTEM_INSTRUCTION = """
+You are an empathetic conversational assistant designed to comfort and engage users 
+who feel lonely. Your responses should be friendly, context-aware, and tailored to the 
+information the user provides.
+
+Follow these guidelines: 
+
+1) Role and context - You are a supportive companion, not a substitute for professional 
+mental health care. - Prioritise empathy, active listening, and validation. 
+2) Response approach - Use user-provided context to tailor replies (tone, topics, depth).
+ - If context is insufficient to respond meaningfully, acknowledge limits and ask clarifying 
+questions rather than guessing. 
+3) Boundaries and safety - Do not provide clinical diagnoses or treatment advice.
+ - If the user expresses distress or self-harm risk, follow a brief safety-oriented script 
+and encourage seeking professional help. 
+4) Conversation style - Be warm, respectful, and non-judgmental. 
+ - Offer small, concrete suggestions to reduce loneliness 
+(e.g., reaching out to a friend, joining a low-pressure activity). 
+5) Interaction structure - Start with a friendly check-in. 
+ - Reflect feelings, ask open-ended questions, and provide optional activities 
+or topics to explore. 
+6) Clarifications when needed 
+ - If a request is unclear, ask targeted questions instead of assumptions.
+"""
 
 
 def format_context(results: list[dict[str, object]]) -> str:
@@ -98,15 +116,19 @@ def _message_content_to_text(content: Any) -> str:
     return str(content).strip()
 
 
-def build_client() -> OpenRouter:
-    """Create a configured OpenRouter client from environment variables."""
+def build_client() -> OpenRouter | None:
+    """Create a configured OpenRouter client from environment variables.
+
+    Returns None when OpenRouter is not configured so the CLI can still run in
+    local-context mode instead of failing at startup.
+    """
 
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is not set")
+        return None
 
     if OpenRouter is None:
-        raise RuntimeError("openrouter package is not installed; install it to use the chat client")
+        return None
 
     return OpenRouter(
         api_key=api_key,
@@ -116,8 +138,17 @@ def build_client() -> OpenRouter:
     )
 
 
-def ask_llm(client: OpenRouter, *, user_prompt: str, context: str) -> str:
+def ask_llm(client: OpenRouter | None, *, user_prompt: str, context: str) -> str:
     """Send a single chat request and return the generated text."""
+
+    if client is None:
+        if context.strip() and context != "No relevant context was found.":
+            return (
+                "OpenRouter is not configured, so I can only surface the retrieved context.\n\n"
+                f"{context}"
+            )
+
+        return "OpenRouter is not configured and no relevant context was found."
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": SYSTEM_INSTRUCTION},

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Protocol, TypedDict
+from uuid import UUID
+from memory.models import LifecycleStateEnum, MemoryTypeEnum
 from vector.embedder import DEFAULT_DIMENSION
 
 import json
@@ -13,6 +15,12 @@ VECTOR_DIMENSION = DEFAULT_DIMENSION
 FAISS_ROOT = Path("data/faiss")
 INDEX_FILENAME = "index.faiss"
 METADATA_FILENAME = "metadata.json"
+INDEX_CONFIG = {
+    MemoryTypeEnum.EPISODIC: "episodic",
+    MemoryTypeEnum.SEMANTIC: "semantic",
+    MemoryTypeEnum.PROCEDURAL: "procedural",
+    MemoryTypeEnum.WORKING: "working",
+}
 
 
 class VectorStoreError(Exception):
@@ -26,11 +34,35 @@ class VectorDimensionError(VectorStoreError):
 class IndexNotInitialisedError(VectorStoreError):
     """Raised when index missing."""
 
+class VectorStore(Protocol):
 
-class SearchResult(TypedDict):
-    vector_id: int
-    score: float
-    metadata: dict[str, Any]
+    def initialise(self) -> None:
+        ...
+    
+    def add_embedding(
+        self,
+        *,
+        memory_id: UUID,
+        agent_id: str,
+        memory_type: MemoryTypeEnum,
+        embedding: list[float],
+        lifecycle_state: LifecycleStateEnum = LifecycleStateEnum.ACTIVE,
+    ) -> None:
+        ...
+    
+    def remove_embedding(
+        self,
+        *,
+        memory_id: UUID,
+        memory_type: MemoryTypeEnum,
+    ) -> None:
+        ...
+    
+    def persist(self) -> None:
+        ...
+    
+    def load(self) -> None:
+        ...
 
 
 def normalise_embedding(embedding: list[float]) -> np.ndarray:
@@ -52,13 +84,42 @@ def normalise_embedding(embedding: list[float]) -> np.ndarray:
 
     return (array / norm).reshape(1, -1)
 
+def uuid_to_int64(value: UUID) -> int:
+    """
+    FAISS requires int64 IDs.
+    """
+    return value.int % (2**63 - 1)
+
+
+def _coerce_memory_type(value: MemoryTypeEnum | str) -> MemoryTypeEnum:
+    if isinstance(value, MemoryTypeEnum):
+        return value
+    return MemoryTypeEnum(str(value))
+
+
+def _coerce_lifecycle_state(
+    value: LifecycleStateEnum | str,
+) -> LifecycleStateEnum:
+    if isinstance(value, LifecycleStateEnum):
+        return value
+    return LifecycleStateEnum(str(value))
+
+class SearchResult(TypedDict):
+    vector_id: int
+    score: float
+    metadata: dict[str, Any]
+
 
 class FAISSStore:
     """Persistent FAISS index with metadata mapping."""
 
     def __init__(self, root_path: Path = FAISS_ROOT):
         self.root_path = root_path
+        # legacy single-index for compatibility
         self.index: faiss.IndexFlatIP | None = None
+        # named indices for advanced usage
+        self.indices: dict[str, faiss.IndexFlatIP] = {}
+        # global metadata map: vector_id -> metadata
         self.metadata: dict[int, dict[str, Any]] = {}
 
     @property
@@ -74,10 +135,20 @@ class FAISSStore:
 
         self.root_path.mkdir(parents=True, exist_ok=True)
 
+        # initialize a single default index for backward compatibility
         if self.index_path.exists():
-            self.index = faiss.read_index(str(self.index_path))
+            try:
+                self.index = faiss.read_index(str(self.index_path))
+            except Exception:
+                # fallback to empty index
+                self.index = faiss.IndexFlatIP(VECTOR_DIMENSION)
         else:
             self.index = faiss.IndexFlatIP(VECTOR_DIMENSION)
+
+        # create named indices (empty) for each configured type
+        for idx_name in INDEX_CONFIG.values():
+            if idx_name not in self.indices:
+                self.indices[idx_name] = faiss.IndexFlatIP(VECTOR_DIMENSION)
 
         if self.metadata_path.exists():
             with open(self.metadata_path, "r", encoding="utf-8") as f:
@@ -94,6 +165,7 @@ class FAISSStore:
     def persist(self) -> None:
         """Persists index and metadata to disk."""
 
+        # persist primary index for compatibility
         if self.index is None:
             raise IndexNotInitialisedError("FAISS index is not initialised")
 
@@ -108,6 +180,11 @@ class FAISSStore:
         *,
         embedding: list[float],
         metadata: dict[str, Any] | None = None,
+        # backwards-compatible optional args
+        memory_id: UUID | None = None,
+        agent_id: str | None = None,
+        memory_type: MemoryTypeEnum | str | None = None,
+        lifecycle_state: LifecycleStateEnum = LifecycleStateEnum.ACTIVE,
     ) -> int:
         """Inserts a single embedding and returns its vector id."""
 
@@ -118,6 +195,18 @@ class FAISSStore:
         vector_id = int(self.index.ntotal)
         self.index.add(embedding_array)
         self.metadata[vector_id] = metadata or {}
+
+        # If memory_type provided, also add to named index (best-effort)
+        if memory_type is not None:
+            try:
+                mtype = _coerce_memory_type(memory_type)
+                name = INDEX_CONFIG.get(mtype)
+                if name and name in self.indices:
+                    self.indices[name].add(embedding_array)
+            except Exception:
+                # don't fail the entire write for index partitioning
+                pass
+
         return vector_id
 
     def add_embeddings(
@@ -196,27 +285,77 @@ class FAISSStore:
 
         return results
 
-    # Async wrappers -----------------------------------------------------
+    async def search_async(
+        self,
+        *,
+        query_embedding: list[float],
+        top_k: int = 10,
+    ) -> list[SearchResult]:
+        """Async wrapper around search for retrieval callers."""
+
+        return await asyncio.to_thread(
+            self.search,
+            query_embedding=query_embedding,
+            top_k=top_k,
+        )
+
+    async def add_embedding_async(
+        self,
+        *,
+        embedding: list[float],
+        metadata: dict[str, Any] | None = None,
+        memory_id: UUID | None = None,
+        agent_id: str | None = None,
+        memory_type: MemoryTypeEnum | str | None = None,
+        lifecycle_state: LifecycleStateEnum = LifecycleStateEnum.ACTIVE,
+    ) -> int:
+        """Async wrapper around add_embedding for ingestion callers."""
+
+        return await asyncio.to_thread(
+            self.add_embedding,
+            embedding=embedding,
+            metadata=metadata,
+            memory_id=memory_id,
+            agent_id=agent_id,
+            memory_type=memory_type,
+            lifecycle_state=lifecycle_state,
+        )
+
     async def add_embeddings_async(
         self,
         *,
         embeddings: list[list[float]],
         metadatas: list[dict[str, Any]] | None = None,
     ) -> list[int]:
-        """Async wrapper around `add_embeddings` using a thread executor."""
+        """Async wrapper around add_embeddings for batch ingestion."""
 
         return await asyncio.to_thread(
-            self.add_embeddings, embeddings=embeddings, metadatas=metadatas
+            self.add_embeddings,
+            embeddings=embeddings,
+            metadatas=metadatas,
         )
+    
+    # Rebuild
+    def clear(self) -> None:
+        """
+        Clears all indices.
+        """
 
-    async def add_embedding_async(
-        self, *, embedding: list[float], metadata: dict[str, Any] | None = None
-    ) -> int:
-        """Async wrapper around `add_embedding` using a thread executor."""
+        self.indices.clear()
+        self.metadata.clear()
 
-        return await asyncio.to_thread(self.add_embedding, embedding=embedding, metadata=metadata)
+        self.initialise()
+    
+    def stats(self) -> dict:
+        """
+        Basic operational stats.
+        """
 
-    async def search_async(self, *, query_embedding: list[float], top_k: int = 10) -> list[SearchResult]:
-        """Async wrapper around `search` using a thread executor."""
+        return {
+            "total_vectors": len(self.metadata),
+            "indices": {
+                name: index.ntotal
+                for name, index in self.indices.items()
+            },
+        }
 
-        return await asyncio.to_thread(self.search, query_embedding=query_embedding, top_k=top_k)

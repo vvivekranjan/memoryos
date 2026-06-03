@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from ingestion.pdf_loader import PDFLoader
 from ingestion.preprocessor import Preprocessor
+from ingestion.multimodal_router import MultimodalRouter
 from memory.models import (
     BaseMemory,
     EpisodicMemory,
@@ -81,6 +82,7 @@ class Pipeline:
     ):
         
         self.pdf_loader = PDFLoader()
+        self.router = MultimodalRouter(self.pdf_loader)
         self.preprocessor = preprocessor or Preprocessor()
         self.chunker = chunker or Chunker()
         self.embedder = embedder or Embedder()
@@ -104,7 +106,14 @@ class Pipeline:
         )
         
         if dedup_result.is_duplicate:
-            return
+            return {
+                "document_id": request.document_id,
+                "chunks": [],
+                "vector_ids": [],
+                "total_chunks": 0,
+                "total_tokens": 0,
+                "duplicate_detected": True,
+            }
 
         chunking_result = self.chunker.chunk(clean_text)
         chunk_texts = [chunk.content for chunk in chunking_result.chunks]

@@ -12,7 +12,9 @@ from retrieval.context_assembler import ContextAssembler
 from retrieval.engine import RetrievalEngine
 from storage.duckdb_store import DuckDBStore
 from storage.faiss_store import FAISSStore
+from storage.sqlite_log import SQLiteEventLog
 from storage.orchestrator import StorageOrchestrator
+from graph.ontology import KuzuDBStore
 
 
 class Memory:
@@ -104,8 +106,15 @@ class Memory:
         
         faiss_store = FAISSStore()
         faiss_store.load()
+        event_log = SQLiteEventLog()
+        graph_store = KuzuDBStore()
         
-        orchestrator = StorageOrchestrator(duckdb_store=duckdb_store, faiss_store=faiss_store)
+        orchestrator = StorageOrchestrator(
+            duckdb_store=duckdb_store,
+            faiss_store=faiss_store,
+            event_log=event_log,
+            graph_store=graph_store,
+        )
         deduplicator = Deduplicator(store=duckdb_store)
         retriever = VectorRetriever(faiss_store=faiss_store, orchestrator=orchestrator, embedder=embedder)
         context_assembler = ContextAssembler()
@@ -113,6 +122,7 @@ class Memory:
             vector_retriever=retriever,
             memory_store=duckdb_store,
             context_assembler=context_assembler,
+            graph_store=graph_store,
         )
         pipeline = Pipeline(
             deduplicator=deduplicator,
