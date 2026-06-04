@@ -19,8 +19,8 @@ def make_mem(memory_type: str, days_old: int = 0, tzaware: bool = True):
     return SimpleNamespace(memory_id=mid, created_at=created, memory_type=memory_type)
 
 
-def test_persistence_and_reload(tmp_path):
-    base = tmp_path / "parts"
+def test_persistence_and_reload(workspace_tmp_path):
+    base = workspace_tmp_path / "parts"
     base.mkdir()
 
     im = IndexManager(dimension=3, base_path=str(base))
@@ -41,8 +41,8 @@ def test_persistence_and_reload(tmp_path):
     assert results[0].memory_id == m1.memory_id
 
 
-def test_dimension_validation(tmp_path):
-    im = IndexManager(dimension=4, base_path=str(tmp_path))
+def test_dimension_validation(workspace_tmp_path):
+    im = IndexManager(dimension=4, base_path=str(workspace_tmp_path))
 
     m = make_mem("note")
     v = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -56,8 +56,8 @@ def test_dimension_validation(tmp_path):
     assert raised
 
 
-def test_naive_datetime_handling(tmp_path):
-    im = IndexManager(dimension=3, base_path=str(tmp_path))
+def test_naive_datetime_handling(workspace_tmp_path):
+    im = IndexManager(dimension=3, base_path=str(workspace_tmp_path))
 
     m = make_mem("note", tzaware=False)
     v = np.array([0.0, 1.0, 0.0], dtype=np.float32)

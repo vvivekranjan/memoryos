@@ -8,6 +8,7 @@ from agents.context_builder import (
     BuiltContext,
     ContextBuilder,
 )
+from core.runtime import MemoryRuntime, build_runtime
 
 from agents.session_manager import (
     AgentSession,
@@ -27,20 +28,11 @@ from memory.models import (
 from retrieval.engine import (
     RetrievalEngine,
 )
-
-from retrieval.vector_retriever import VectorRetriever
 from vector.embedder import (
     Embedder,
 )
 
-from storage.duckdb_store import DuckDBStore
-from storage.faiss_store import FAISSStore
-from storage.sqlite_log import SQLiteEventLog
-from storage.orchestrator import StorageOrchestrator
-from graph.ontology import KuzuDBStore
-
 from retrieval.context_assembler import ContextBlock
-from retrieval.context_assembler import ContextAssembler
 
 @dataclass(slots=True)
 class IngestResult:
@@ -92,6 +84,7 @@ class MemoryClient:
         context_builder: ContextBuilder | None = None,
         session_manager: SessionManager | None = None,
         embedder: Embedder | None = None,
+        runtime: MemoryRuntime | None = None,
     ):
         self.agent_id = agent_id
         self.endpoint = endpoint
@@ -99,32 +92,32 @@ class MemoryClient:
         self.embedder = embedder or Embedder()
         self.context_builder = context_builder or ContextBuilder()
         self.session_manager = session_manager or SessionManager()
+        self.runtime = runtime
 
-        self.db_store = DuckDBStore()
-        self.faiss_store = FAISSStore()
-        self.event_log = SQLiteEventLog()
-        self.graph_store = KuzuDBStore()
-        self.db_store.initialise()
-        self.faiss_store.load()
+        if self.runtime is None and (ingestion_pipeline is None or retrieval_engine is None):
+            self.runtime = build_runtime(embedder=self.embedder)
 
-        self.orchestrator = StorageOrchestrator(
-            duckdb_store=self.db_store,
-            faiss_store=self.faiss_store,
-            event_log=self.event_log,
-            graph_store=self.graph_store,
-        )
+        if self.runtime is not None:
+            self.db_store = self.runtime.duckdb_store
+            self.faiss_store = self.runtime.faiss_store
+            self.event_log = self.runtime.event_log
+            self.graph_store = self.runtime.graph_store
+            self.orchestrator = self.runtime.orchestrator
+            self.ingestion = ingestion_pipeline or self.runtime.pipeline
+            self.retrieval_engine = retrieval_engine or self.runtime.retrieval_engine
+        else:
+            self.db_store = None
+            self.faiss_store = None
+            self.event_log = None
+            self.graph_store = None
+            self.orchestrator = None
+            self.ingestion = ingestion_pipeline
+            self.retrieval_engine = retrieval_engine
 
-        self.ingestion = ingestion_pipeline or Pipeline(orchestrator=self.orchestrator)
-        self.retrieval_engine = retrieval_engine or RetrievalEngine(
-            vector_retriever=VectorRetriever(
-                faiss_store=self.faiss_store,
-                orchestrator=self.orchestrator,
-                embedder=self.embedder,
-            ),
-            memory_store=self.db_store,
-            context_assembler=ContextAssembler(),
-            graph_store=self.graph_store,
-        )
+        if self.ingestion is None or self.retrieval_engine is None:
+            raise ValueError(
+                "MemoryClient requires either a runtime or both ingestion and retrieval dependencies"
+            )
 
     async def ingest(
         self,
@@ -213,12 +206,14 @@ class MemoryClient:
         Retrieves prompt-ready context.
         """
 
+        resolved_agent_id = agent_id or self.agent_id
+
         # Generate query embedding using the provided embedder
         embeddings = await self.embedder.generate_embeddings([query])
         query_embedding = embeddings[0].tolist() if len(embeddings) > 0 else []
 
         result = await self.retrieval_engine.retrieve(
-            agent_id=agent_id,
+            agent_id=resolved_agent_id,
             query=query,
             query_embedding=query_embedding,
             top_k=top_k,
@@ -378,5 +373,7 @@ class MemoryClient:
         memory_id: str,
     ) -> None:
         """Remove a memory."""
-        pass
+        raise NotImplementedError(
+            "forget() is not implemented yet; add coordinated deletion across DuckDB, FAISS, and graph stores first"
+        )
 

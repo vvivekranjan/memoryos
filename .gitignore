@@ -17,3 +17,7 @@ wheels/
 
 # Database files
 data/
+
+# Test-generated files
+.tmp/
+.tmp-check/

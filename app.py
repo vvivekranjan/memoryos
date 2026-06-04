@@ -10,9 +10,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from openrouter import OpenRouter
+try:
+    from openrouter import OpenRouter
+except ImportError:  # pragma: no cover - optional runtime dependency
+    OpenRouter = None  # type: ignore[assignment]
+
+from core.config import load_system_prompt
 from main import Memory
-from utils.logger import get_logger
+from utils.logger import get_logger, log_exception
 
 
 def _load_env_file(env_path: Path) -> None:
@@ -36,30 +41,7 @@ _load_env_file(PROJECT_ROOT / ".env")
 
 
 MODEL_NAME = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-SYSTEM_INSTRUCTION = """
-You are an empathetic conversational assistant designed to comfort and engage users 
-who feel lonely. Your responses should be friendly, context-aware, and tailored to the 
-information the user provides.
-
-Follow these guidelines: 
-
-1) Role and context - You are a supportive companion, not a substitute for professional 
-mental health care. - Prioritise empathy, active listening, and validation. 
-2) Response approach - Use user-provided context to tailor replies (tone, topics, depth).
- - If context is insufficient to respond meaningfully, acknowledge limits and ask clarifying 
-questions rather than guessing. 
-3) Boundaries and safety - Do not provide clinical diagnoses or treatment advice.
- - If the user expresses distress or self-harm risk, follow a brief safety-oriented script 
-and encourage seeking professional help. 
-4) Conversation style - Be warm, respectful, and non-judgmental. 
- - Offer small, concrete suggestions to reduce loneliness 
-(e.g., reaching out to a friend, joining a low-pressure activity). 
-5) Interaction structure - Start with a friendly check-in. 
- - Reflect feelings, ask open-ended questions, and provide optional activities 
-or topics to explore. 
-6) Clarifications when needed 
- - If a request is unclear, ask targeted questions instead of assumptions.
-"""
+SYSTEM_INSTRUCTION = load_system_prompt()
 
 
 def format_context(results: list[dict[str, object]]) -> str:
@@ -192,6 +174,7 @@ def _remember_turn(memory: Memory, *, turn_index: int, user_prompt: str, assista
 def main() -> None:
     """Run an interactive retrieval-augmented chat loop."""
 
+    logger = get_logger(__name__, subsystem="app.cli")
     memory = Memory()
     client = build_client()
 
@@ -227,7 +210,7 @@ def main() -> None:
             # UX: print to console for interactive users
             print("AI:", answer)
             # Structured log for observability
-            get_logger(__name__, subsystem="app.cli").info("ai.response", extra={"answer": answer})
+            logger.info("ai.response", extra={"answer": answer})
             turn_index += 1
             _remember_turn(
                 memory,
@@ -236,7 +219,7 @@ def main() -> None:
                 assistant_reply=answer,
             )
         except Exception as exc:
-            get_logger(__name__, subsystem="app.cli").exception("ai.error", exc=exc)
+            log_exception(logger, message="ai.error", exc=exc)
             print(f"AI error: {exc}")
 
 
