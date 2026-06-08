@@ -9,6 +9,8 @@ from uuid import UUID
 from memory.models import (
     BaseMemory,
     MemoryTypeEnum,
+    RetrievalCandidate,
+    RetrievalTrace,
 )
 
 from retrieval.context_assembler import (
@@ -16,7 +18,6 @@ from retrieval.context_assembler import (
 )
 
 from retrieval.vector_retriever import (
-    RetrievalCandidate,
     VectorRetriever,
 )
 

@@ -135,19 +135,22 @@ class FAISSStore:
 
         self.root_path.mkdir(parents=True, exist_ok=True)
 
-        # initialize a single default index for backward compatibility
         if self.index_path.exists():
             try:
                 self.index = faiss.read_index(str(self.index_path))
             except Exception:
-                # fallback to empty index
                 self.index = faiss.IndexFlatIP(VECTOR_DIMENSION)
         else:
             self.index = faiss.IndexFlatIP(VECTOR_DIMENSION)
 
-        # create named indices (empty) for each configured type
         for idx_name in INDEX_CONFIG.values():
-            if idx_name not in self.indices:
+            index_path = self.root_path / f"{idx_name}.faiss"
+            if index_path.exists():
+                try:
+                    self.indices[idx_name] = faiss.read_index(str(index_path))
+                except Exception:
+                    self.indices[idx_name] = self.indices.get(idx_name, faiss.IndexFlatIP(VECTOR_DIMENSION))
+            else:
                 self.indices[idx_name] = faiss.IndexFlatIP(VECTOR_DIMENSION)
 
         if self.metadata_path.exists():
@@ -165,12 +168,18 @@ class FAISSStore:
     def persist(self) -> None:
         """Persists index and metadata to disk."""
 
-        # persist primary index for compatibility
         if self.index is None:
             raise IndexNotInitialisedError("FAISS index is not initialised")
 
         self.root_path.mkdir(parents=True, exist_ok=True)
+
         faiss.write_index(self.index, str(self.index_path))
+
+        for name, index in self.indices.items():
+            try:
+                faiss.write_index(index, str(self.root_path / f"{name}.faiss"))
+            except Exception:
+                pass
 
         with open(self.metadata_path, "w", encoding="utf-8") as f:
             json.dump(self.metadata, f, ensure_ascii=True, indent=2)

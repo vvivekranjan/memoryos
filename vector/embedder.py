@@ -5,11 +5,11 @@ from typing import List
 
 import numpy as np
 import asyncio
+
+from core.config import MemoryConfig
 from utils.logger import get_logger
 
-DEFAULT_MODEL = "sentence-transformers/all-mpnet-base-v2"
-
-DEFAULT_DIMENSION = 768
+DEFAULT_DIMENSION = MemoryConfig.default_dimension
 
 class EmbeddingError(Exception):
     """Base embedding error."""
@@ -36,10 +36,10 @@ class Embedder:
     - embedding batching
     """
 
-    def __init__(self, model_name: str = DEFAULT_MODEL):
+    def __init__(self, model_name: str = MemoryConfig.embedding_model):
         self.model_name = model_name
         self.model = None
-        self.embedding_dimension = DEFAULT_DIMENSION
+        self.embedding_dimension = MemoryConfig.default_dimension
         self._logger = get_logger(__name__, subsystem="vector.embedder")
         # defer heavy model loading until needed
     
@@ -52,7 +52,7 @@ class Embedder:
             try:
                 dimension = self.model.get_embedding_dimension()
             except Exception:
-                dimension = getattr(self.model, "get_embedding_dimension", lambda: DEFAULT_DIMENSION)()
+                dimension = getattr(self.model, "get_embedding_dimension", lambda: MemoryConfig.default_dimension)()
             self.embedding_dimension = int(dimension)
             self._logger.info("model loaded", extra={"embedding_dimension": self.embedding_dimension})
         except Exception as e:

@@ -137,10 +137,10 @@ class StorageOrchestrator:
                     agent_id=memory.agent_id,
                     payload=IngestionPayload(
                         memory_id=memory.memory_id,
-                        memory_type=str(memory.memory_type),
+                        memory_type=memory.memory_type.value,
                         sha256=memory.sha256,
                         chunks_created=1,
-                        modality=str(memory.modality),
+                        modality=memory.modality.value,
                         pipeline_stages_ms={},
                         entity_count=0,
                         relation_count=0,
@@ -175,7 +175,7 @@ class StorageOrchestrator:
                     metadata={
                         "memory_id": str(memory.memory_id),
                         "agent_id": memory.agent_id,
-                        "memory_type": str(memory.memory_type),
+                        "memory_type": memory.memory_type.value,
                     }
                 )
 
@@ -282,7 +282,7 @@ class StorageOrchestrator:
     ) -> None:
         memory = self.duckdb.get_memory(memory_id)
         old_state = memory.lifecycle_state
-        self.duckdb._apply_lifecycle_transition(memory_id, new_state)
+        self.duckdb.apply_lifecycle_transition(memory_id, new_state)
 
         if self.event_log is not None:
             self.event_log.log_lifecycle_transition(

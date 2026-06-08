@@ -18,7 +18,9 @@ from memory.models import (
     EpisodicMemory,
     LifecycleStateEnum,
     ModalityEnum,
+    ProceduralMemory,
     ProvenanceEnum,
+    SemanticMemory,
     WorkingMemory,
     MemoryTypeEnum,
     SpeakerRoleEnum,
@@ -153,7 +155,7 @@ CREATE TABLE IF NOT EXISTS procedural_memories (
 
     trigger_condition TEXT NOT NULL,
 
-    steps TEXT[] NOT NULL,
+    steps VARCHAR[] NOT NULL,
 
     success_count INTEGER DEFAULT 0,
 
@@ -477,6 +479,94 @@ class DuckDBStore:
                             memory.expires_at,
                         ],
                     )
+                
+                # =================================================
+                # Semantic
+                # =================================================
+
+                if isinstance(memory, SemanticMemory):
+
+                    conn.execute(
+                        """
+                        INSERT INTO semantic_memories (
+                            memory_id,
+                            entity,
+                            relation,
+                            object_value,
+                            confidence,
+                            entity_type,
+                            object_type,
+                            source_url,
+                            contradicted_by,
+                            promoted_from,
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            str(memory.memory_id),
+                            str(memory.entity),
+                            str(memory.relation),
+                            str(memory.object_value),
+                            memory.confidence,
+                            memory.entity_type,
+                            memory.object_type,
+                            memory.source_url,
+
+                            json_dumps(
+                                [
+                                    str(x)
+                                    for x in memory.contradicted_by
+                                ]
+                            ),
+
+                            (
+                                str(memory.promoted_from)
+                                if memory.promoted_from
+                                else None
+                            ),
+                        ],
+                    )
+
+                # =================================================
+                # Procedural
+                # =================================================
+
+                elif isinstance(memory, ProceduralMemory):
+
+                    conn.execute(
+                        """
+                        INSERT INTO procedural_memories (
+                            memory_id,
+                            trigger_condition,
+                            steps,
+                            success_count,
+                            failure_count,
+                            avg_execution_time_ms,
+                            abstracted_from,
+                            domain
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            str(memory.memory_id),
+                            str(memory.trigger_condition),
+
+                            json_dumps(memory.steps),
+
+                            memory.success_count,
+                            memory.failure_count,
+                            memory.avg_execution_time_ms,
+
+                            json_dumps(
+                                [
+                                    str(x)
+                                    for x in memory.abstracted_from
+                                ]
+                            ),
+
+                            str(memory.domain),
+                        ],
+                    )
             
                 conn.commit()
             
@@ -660,6 +750,100 @@ class DuckDBStore:
                 )
 
                 return WorkingMemory(**base_data)
+            
+            # =================================================
+            # Semantic
+            # =================================================
+
+            elif row[2] == MemoryTypeEnum.SEMANTIC.value:
+
+                ext = conn.execute(
+                    """
+                    SELECT *
+                    FROM semantic_memories
+                    WHERE memory_id = ?
+                    """,
+                    [str(memory_id)],
+                ).fetchone()
+
+                if ext is None:
+                    raise MemoryNotFoundError(
+                        f"Semantic extension missing for: {memory_id}"
+                    )
+
+                base_data.update(
+                    {
+                        "entity": ext[1],
+
+                        "relation": ext[2],
+
+                        "object_value": ext[3],
+
+                        "confidence": ext[4],
+
+                        "entity_type": ext[5],
+
+                        "object_type": ext[6],
+
+                        "source_url": ext[7],
+
+                        "contradicted_by": [
+                            coerce_uuid(x)
+                            for x in json_loads(ext[8])
+                        ],
+
+                        "promoted_from": (
+                            coerce_uuid(ext[9])
+                            if ext[9]
+                            else None
+                        ),
+                    }
+                )
+
+                return SemanticMemory(**base_data)
+            
+            # =================================================
+            # Procedural
+            # =================================================
+
+            elif row[2] == MemoryTypeEnum.PROCEDURAL.value:
+
+                ext = conn.execute(
+                    """
+                    SELECT *
+                    FROM procedural_memories
+                    WHERE memory_id = ?
+                    """,
+                    [str(memory_id)],
+                ).fetchone()
+
+                if ext is None:
+                    raise MemoryNotFoundError(
+                        f"Procedural extension missing for: {memory_id}"
+                    )
+
+                base_data.update(
+                    {
+                        "trigger_condition": ext[1],
+
+                        "steps": json_loads(ext[2]),
+
+                        "success_count": ext[3],
+
+                        "failure_count": ext[4],
+
+                        "avg_execution_time_ms": ext[5],
+
+                        "abstracted_from": [
+                            coerce_uuid(x)
+                            for x in json_loads(ext[6])
+                        ],
+
+                        "domain": ext[7],
+                    }
+                )
+
+                return ProceduralMemory(**base_data)
 
             return BaseMemory(**base_data)
     
@@ -696,7 +880,7 @@ class DuckDBStore:
     # LIFECYCLE
     # ========================================================
 
-    def _apply_lifecycle_transition(
+    def apply_lifecycle_transition(
         self,
         memory_id: UUID,
         new_state: LifecycleStateEnum,
@@ -806,37 +990,10 @@ class DuckDBStore:
                 [agent_id, *map(str, memory_ids)],
             ).fetchall()
 
-        for row in rows:
-            self.update_access_metadata(coerce_uuid(row[0]))
-
         return [
             self.get_memory(coerce_uuid(row[0]))
             for row in rows
         ]
-
-    async def content_hash_exists(
-        self,
-        *,
-        agent_id: str,
-        content_hash: str,
-    ) -> bool:
-        """
-        Deduplication lookup by sha256.
-        """
-
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT 1
-                FROM memories
-                WHERE agent_id = ?
-                  AND sha256 = ?
-                LIMIT 1
-                """,
-                [agent_id, content_hash],
-            ).fetchone()
-
-        return row is not None
 
     def projection_exists(
         self,

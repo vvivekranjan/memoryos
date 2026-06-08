@@ -1,10 +1,11 @@
 from __future__ import annotations
+import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from uuid import UUID, uuid4
 from enum import Enum
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Any, Literal
+from typing import List, Optional, Any, Literal
 
 import re
 
@@ -210,6 +211,29 @@ class BaseMemory(BaseModel):
 
         return value
 
+    @field_validator("modality")
+    @classmethod
+    def validate_modality(cls, value: ModalityEnum) -> ModalityEnum:
+        return value
+
+    @field_validator("lifecycle_state")
+    @classmethod
+    def validate_lifecycle_state(cls, value: LifecycleStateEnum) -> LifecycleStateEnum:
+        return value
+
+    @field_validator("provenance")
+    @classmethod
+    def validate_provenance(cls, value: ProvenanceEnum) -> ProvenanceEnum:
+        return value
+
+    @field_validator("schema_version")
+    @classmethod
+    def validate_schema_version(cls, value: str) -> str:
+        import re
+        if not re.fullmatch(r"^\d+\.\d+\.\d+$", value):
+            raise ValueError("schema_version must follow semantic versioning (e.g. 1.0.0)")
+        return value
+
 class EpisodicMemory(BaseMemory):
     """
     Canonical replay memory.
@@ -273,6 +297,93 @@ class WorkingMemory(BaseMemory):
                 + timedelta(seconds=self.ttl_seconds)
             )
 
+class SemanticMemory(BaseMemory):
+    """
+    Memory stored with semantic relation
+    """
+
+    memory_type: Literal[MemoryTypeEnum.SEMANTIC] = (MemoryTypeEnum.SEMANTIC)
+    entity: str # normalised entity label (subject)
+    relation: str # predicate string (e.g. 'works_at')
+    object_value: str # object of SPO triple
+    confidence: float # extraction confidence [0.0, 1.0]
+    entity_type: Optional[str] = None # PERSON|ORG|PLACE|CONCEPT|EVENT
+    object_type: Optional[str] = None
+    source_url: Optional[str] = None # origin document URL or path
+    contradicted_by: list[UUID] = Field(default_factory=list) # IDs of conflicting SemanticMemories
+    promoted_from: Optional[UUID] = None # if promoted from hypothesisMemory
+
+    @field_validator("entity")
+    @classmethod
+    def validate_entity(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Entity cannot be empty")
+        
+        return value
+    
+    @field_validator("relation")
+    @classmethod
+    def validate_relation(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Relation cannot be empty")
+        
+        return value
+    
+    @field_validator("object_value")
+    @classmethod
+    def validate_object_value(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Object value cannot be empty")
+        
+        return value
+
+class ProceduralMemory(BaseMemory):
+    """
+    Procedure stored Memory
+    """
+
+    memory_type: Literal[MemoryTypeEnum.PROCEDURAL] = (MemoryTypeEnum.PROCEDURAL)
+    trigger_condition: str # natural language activation condition
+    steps: list[str] # ordered execution steps; min 1
+    success_count: int = 0 # CONFIRMED feedback signals
+    failure_count: int = 0 # CORRECTION feedback signals
+    avg_execution_time_ms: Optional[float] = None
+    abstracted_from: list[UUID] = Field(default_factory=list) # source episodic/compressed IDs
+    domain: Optional[str] = None # e.g. 'code', 'research'
+
+    @field_validator("steps")
+    @classmethod
+    def validate_steps(cls, value: list[str]) -> list[str]:
+
+        if not value or '0' in value:
+            raise ValueError("Value cannot be empty or atleast minimum step is 1")
+        
+        return value
+    
+    @field_validator("success_count")
+    @classmethod
+    def validate_success_count(cls, value: int) -> int:
+
+        if value < 0:
+            raise ValueError("Success count should be non negative number")
+        
+        return value
+    
+    @field_validator("failure_count")
+    @classmethod
+    def validate_failure_count(cls, value: int) -> int:
+
+        if value < 0:
+            raise ValueError("Failure count should be non negative number")
+        
+        return value
+
 class BaseEvent(BaseModel):
     """
     Immutable append-only event.
@@ -302,6 +413,36 @@ class BaseEvent(BaseModel):
         
         return value
 
+    @field_validator("event_id")
+    @classmethod
+    def validate_event_id(cls, value: UUID) -> UUID:
+        if not isinstance(value, UUID):
+            raise ValueError("event_id must be a UUID")
+        return value
+
+    @field_validator("agent_id")
+    @classmethod
+    def validate_base_agent_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("agent_id cannot be empty")
+        return value
+
+    @field_validator("payload")
+    @classmethod
+    def validate_base_payload(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("payload must be a dictionary")
+        return value
+
+    @field_validator("schema_version")
+    @classmethod
+    def validate_schema_version(cls, value: str) -> str:
+        import re
+        if not re.fullmatch(r"^\d+\.\d+\.\d+$", value):
+            raise ValueError("schema_version must follow semantic versioning (e.g. 1.0.0)")
+        return value
+
 class IngestionPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
@@ -315,6 +456,52 @@ class IngestionPayload(BaseModel):
     relation_count: int = 0
     emotion_class: Optional[str] = None
     provenance: str = "OBSERVED"
+
+    @field_validator("memory_type")
+    @classmethod
+    def validate_memory_type(cls, value: str) -> str:
+        value = value.strip().upper()
+        if value not in MemoryTypeEnum._value2member_map_:
+            raise ValueError(f"memory_type must be one of {list(MemoryTypeEnum._value2member_map_.keys())}")
+        return value
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        import re
+        value = value.lower().strip()
+        if not re.fullmatch(r"^[a-f0-9]{64}$", value):
+            raise ValueError("sha256 must be exactly 64 lowercase hex characters")
+        return value
+
+    @field_validator("chunks_created")
+    @classmethod
+    def validate_chunks_created(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("chunks_created must be >= 0")
+        return value
+
+    @field_validator("entity_count", "relation_count")
+    @classmethod
+    def validate_non_negative_counts(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("count must be >= 0")
+        return value
+
+    @field_validator("pipeline_stages_ms")
+    @classmethod
+    def validate_pipeline_stages(cls, value: dict[str, float]) -> dict[str, float]:
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise ValueError("pipeline_stages_ms keys must be strings")
+            if v < 0:
+                raise ValueError("pipeline_stages_ms values must be >= 0")
+        return value
+
+    @field_validator("provenance")
+    @classmethod
+    def validate_provenance(cls, value: str) -> str:
+        return value.strip().upper()
 
 class RetrievalPayload(BaseModel):
     
@@ -341,6 +528,55 @@ class LifecycleTransitionPayload(BaseModel):
     new_state: LifecycleStateEnum
     trigger: TriggerEnum
     importance_at_transition: float
+
+class SessionScope(BaseModel):
+    model_config = ConfigDict(strict=True)
+    
+    agent_id: str
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    working_memory_ids: List[str] = Field(default_factory=list)
+    spreading_activation_seeds: List[str] = Field(default_factory=list)
+
+class RetrieverContribution(BaseModel):
+    model_config = ConfigDict(strict=True)
+    
+    retriever: str
+    rank: int
+    raw_score: float
+    rrf_contribution: float
+
+class RetrievalTrace(BaseModel):
+    model_config = ConfigDict(strict=True)
+    
+    memory_id: str
+    retrieved_by: List[RetrieverContribution]
+    final_score: float
+    importance_score: float
+    recency_boost: float
+    activation_boost: float
+    graph_path: Optional[List[str]] = None
+    provenance_tag: str
+    conflict_flag: bool
+    timestamp_retrieved: datetime
+
+class RetrievalCandidate(BaseModel):
+    model_config = ConfigDict(strict=True)
+    
+    memory_id: str
+    content: str
+    memory_type: MemoryTypeEnum
+    final_score: float
+    trace: RetrievalTrace
+
+class RetrievalResponse(BaseModel):
+    model_config = ConfigDict(strict=True)
+    
+    results: List[RetrievalCandidate]
+    query_id: str
+    latency_ms: float
+    cache_hit: bool
+    retrievers_active: List[str]
+    semantic_cache_checked: bool
 
 # Utilites
 def utc_now() -> datetime:

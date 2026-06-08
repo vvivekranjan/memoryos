@@ -12,3 +12,4 @@ kuzu
 orjson
 pytest
 pymupdf
+spacy

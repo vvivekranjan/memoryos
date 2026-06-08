@@ -11,8 +11,10 @@ from vector.embedder import Embedder
 from utils.logger import get_logger
 
 
+
+
 @dataclass(slots=True)
-class RetrievalCandidate:
+class VectorCandidate:
     memory_id: UUID
     score: float
     metadata: dict[str, Any]
@@ -37,7 +39,7 @@ class VectorRetriever:
         *,
         query_embedding: list[float],
         top_k: int = 5,
-    ) -> list[RetrievalCandidate]:
+    ) -> list[VectorCandidate]:
         """Synchronously search the vector index using a precomputed embedding."""
 
         try:
@@ -54,7 +56,7 @@ class VectorRetriever:
         *,
         query_embedding: list[float],
         top_k: int = 5,
-    ) -> list[RetrievalCandidate]:
+    ) -> list[VectorCandidate]:
         """Async vector search that returns lightweight candidates for the coordinator."""
 
         if top_k <= 0:
@@ -65,7 +67,7 @@ class VectorRetriever:
             top_k=top_k,
         )
 
-        candidates: list[RetrievalCandidate] = []
+        candidates: list[VectorCandidate] = []
         for result in results:
             memory_id = result["metadata"].get("memory_id")
             if not memory_id:
@@ -77,7 +79,7 @@ class VectorRetriever:
                 continue
 
             candidates.append(
-                RetrievalCandidate(
+                VectorCandidate(
                     memory_id=candidate_id,
                     score=float(result["score"]),
                     metadata=dict(result["metadata"]),
@@ -159,7 +161,7 @@ class VectorRetriever:
                             "memory_id": str(memory.memory_id),
                             "content": memory.content,
                             "agent_id": memory.agent_id,
-                            "memory_type": str(memory.memory_type),
+                            "memory_type": memory.memory_type.value,
                         },
                     }
                 )

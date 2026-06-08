@@ -15,7 +15,7 @@ try:
 except ImportError:  # pragma: no cover - optional runtime dependency
     OpenRouter = None  # type: ignore[assignment]
 
-from core.config import load_system_prompt
+from core.config import MemoryConfig
 from main import Memory
 from utils.logger import get_logger, log_exception
 
@@ -41,7 +41,7 @@ _load_env_file(PROJECT_ROOT / ".env")
 
 
 MODEL_NAME = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-SYSTEM_INSTRUCTION = load_system_prompt()
+SYSTEM_INSTRUCTION = MemoryConfig.load_system_prompt()
 
 
 def format_context(results: list[dict[str, object]]) -> str:
