@@ -5,13 +5,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 from uuid import UUID
 
+from memory.models import LifecycleStateEnum, MemoryTypeEnum
 from storage.faiss_store import FAISSStore, SearchResult
 from storage.orchestrator import StorageOrchestrator
 from vector.embedder import Embedder
 from utils.logger import get_logger
-
-
-
 
 @dataclass(slots=True)
 class VectorCandidate:
@@ -37,8 +35,12 @@ class VectorRetriever:
     def search(
         self,
         *,
+        agent_id: str,
         query_embedding: list[float],
         top_k: int = 5,
+        memory_types: list[MemoryTypeEnum],
+        lifecycle_states: list[LifecycleStateEnum],
+        min_importance: float,
     ) -> list[VectorCandidate]:
         """Synchronously search the vector index using a precomputed embedding."""
 
@@ -54,8 +56,12 @@ class VectorRetriever:
     async def search_async(
         self,
         *,
+        agent_id: str,
         query_embedding: list[float],
         top_k: int = 5,
+        memory_types: list[MemoryTypeEnum],
+        lifecycle_states: list[LifecycleStateEnum],
+        min_importance: float,
     ) -> list[VectorCandidate]:
         """Async vector search that returns lightweight candidates for the coordinator."""
 

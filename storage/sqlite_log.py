@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 import orjson
 
+from core.exceptions import EventLogCorruptionError, SequenceGapError
 from memory.models import (
     BaseEvent,
     EventTypeEnum,
@@ -17,6 +18,7 @@ from memory.models import (
     IngestionPayload,
     LifecycleTransitionPayload,
     RetrievalPayload,
+    TransactionStateEnum,
     TriggerEnum,
     utc_now,
 )
@@ -95,28 +97,6 @@ CREATE INDEX IF NOT EXISTS idx_events_occurred
 ON events(occurred_at);
 """
 
-class EventLogCorruptionError(
-    Exception
-):
-    """
-    Raised when checksum mismatch detected.
-    """
-
-
-class SequenceGapError(
-    Exception
-):
-    """
-    Raised when sequence gap detected.
-    """
-
-
-class TransactionStateEnum(str, Enum):
-    PENDING = "PENDING"
-    COMMITTED = "COMMITTED"
-    CORRUPTED = "CORRUPTED"
-    FAILED = "FAILED"
-
 class SQLiteEventLog:
     """
     Authoritative append-only SQLite
@@ -150,18 +130,9 @@ class SQLiteEventLog:
             check_same_thread=False,
         )
 
-        self.conn.row_factory = (
-            sqlite3.Row
-        )
-
-        self.conn.execute(
-            "PRAGMA foreign_keys = ON"
-        )
-
-        self.conn.execute(
-            "PRAGMA journal_mode = WAL"
-        )
-
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.execute("PRAGMA journal_mode = WAL")
         self._initialise()
 
     def _initialise(self) -> None:
@@ -172,33 +143,13 @@ class SQLiteEventLog:
 
         with self.conn:
 
-            self.conn.execute(
-                CREATE_EVENTS_TABLE
-            )
-
-            self.conn.execute(
-                CREATE_EVENT_TRANSACTION_TABLE
-            )
-
-            self.conn.execute(
-                CREATE_REFLECTION_AUDIT_TABLE
-            )
-
-            self.conn.execute(
-                CREATE_AGENT_SEQUENCES_TABLE
-            )
-
-            self.conn.execute(
-                CREATE_AGENT_SEQ_INDEX
-            )
-
-            self.conn.execute(
-                CREATE_TYPE_INDEX
-            )
-
-            self.conn.execute(
-                CREATE_OCCURRED_INDEX
-            )
+            self.conn.execute(CREATE_EVENTS_TABLE)
+            self.conn.execute(CREATE_EVENT_TRANSACTION_TABLE)
+            self.conn.execute(CREATE_REFLECTION_AUDIT_TABLE)
+            self.conn.execute(CREATE_AGENT_SEQUENCES_TABLE)
+            self.conn.execute(CREATE_AGENT_SEQ_INDEX)
+            self.conn.execute(CREATE_TYPE_INDEX)
+            self.conn.execute(CREATE_OCCURRED_INDEX)
 
     @staticmethod
     def compute_checksum(
@@ -453,8 +404,6 @@ class SQLiteEventLog:
 
             with self.conn:
 
-                self.conn.execute("BEGIN IMMEDIATE")
-
                 sequence_num = (
                     self._next_sequence_num(
                         agent_id=agent_id
@@ -464,18 +413,10 @@ class SQLiteEventLog:
                 checksum = (
                     self.compute_checksum(
                         event_id=event_id,
-                        schema_version=(
-                            SCHEMA_VERSION
-                        ),
-                        event_type=(
-                            event_type.value
-                        ),
-                        occurred_at=(
-                            occurred_at_str
-                        ),
-                        sequence_num=(
-                            sequence_num
-                        ),
+                        schema_version=SCHEMA_VERSION,
+                        event_type=event_type.value,
+                        occurred_at=occurred_at_str,
+                        sequence_num=sequence_num,
                         payload=payload_str,
                     )
                 )
@@ -561,127 +502,129 @@ class SQLiteEventLog:
         WHERE agent_id = ?
         """
 
-        params: list = [agent_id]
+        with self._lock:
 
-        if before:
+            params: list = [agent_id]
+
+            if before:
+
+                query += (
+                    " AND occurred_at <= ?"
+                )
+
+                params.append(
+                    before.isoformat()
+                )
+
+            if event_type:
+
+                query += (
+                    " AND event_type = ?"
+                )
+
+                params.append(
+                    event_type.value
+                )
 
             query += (
-                " AND occurred_at <= ?"
+                " ORDER BY sequence_num ASC"
             )
 
-            params.append(
-                before.isoformat()
-            )
+            rows = self.conn.execute(
+                query,
+                params,
+            ).fetchall()
 
-        if event_type:
+            events: list[
+                BaseEvent
+            ] = []
 
-            query += (
-                " AND event_type = ?"
-            )
+            prev_seq = -1
 
-            params.append(
-                event_type.value
-            )
+            for row in rows:
 
-        query += (
-            " ORDER BY sequence_num ASC"
-        )
-
-        rows = self.conn.execute(
-            query,
-            params,
-        ).fetchall()
-
-        events: list[
-            BaseEvent
-        ] = []
-
-        prev_seq = -1
-
-        for row in rows:
-
-            expected = (
-                self.compute_checksum(
-                    event_id=row["event_id"],
-                    schema_version=row["schema_version"],
-                    event_type=row["event_type"],
-                    occurred_at=row["occurred_at"],
-                    sequence_num=row["sequence_num"],
-                    payload=row["payload"],
-                )
-            )
-
-            if (expected != row["checksum"]):
-                raise (
-                    EventLogCorruptionError(
-                        f"Checksum mismatch "
-                        f"event_id="
-                        f"{row['event_id']}"
+                expected = (
+                    self.compute_checksum(
+                        event_id=row["event_id"],
+                        schema_version=row["schema_version"],
+                        event_type=row["event_type"],
+                        occurred_at=row["occurred_at"],
+                        sequence_num=row["sequence_num"],
+                        payload=row["payload"],
                     )
                 )
 
-            if (
-                prev_seq == -1
-                and row[
-                    "sequence_num"
-                ] != 0
-            ):
-                raise (
-                    SequenceGapError(
-                        f"First sequence "
-                        f"is "
-                        f"{row['sequence_num']}"
+                if (expected != row["checksum"]):
+                    raise (
+                        EventLogCorruptionError(
+                            f"Checksum mismatch "
+                            f"event_id="
+                            f"{row['event_id']}"
+                        )
+                    )
+
+                if (
+                    prev_seq == -1
+                    and row[
+                        "sequence_num"
+                    ] != 0
+                ):
+                    raise (
+                        SequenceGapError(
+                            f"First sequence "
+                            f"is "
+                            f"{row['sequence_num']}"
+                        )
+                    )
+
+                if (
+                    prev_seq != -1
+                    and row[
+                        "sequence_num"
+                    ]
+                    != prev_seq + 1
+                ):
+                    raise (
+                        SequenceGapError(
+                            f"Gap detected "
+                            f"at "
+                            f"{row['sequence_num']}"
+                        )
+                    )
+
+                prev_seq = row["sequence_num"]
+
+                events.append(
+                    BaseEvent(
+                        event_id=UUID(row["event_id"]),
+                        schema_version=row["schema_version"],
+                        event_type=(
+                            EventTypeEnum(
+                                row[
+                                    "event_type"
+                                ]
+                            )
+                        ),
+                        agent_id=row["agent_id"],
+                        occurred_at=(
+                            datetime
+                            .fromisoformat(
+                                row[
+                                    "occurred_at"
+                                ]
+                            )
+                        ),
+                        payload=(
+                            orjson.loads(
+                                row["payload"]
+                            )
+                        ),
+                        checksum=row["checksum"],
+                        sequence_num=row["sequence_num"],
                     )
                 )
 
-            if (
-                prev_seq != -1
-                and row[
-                    "sequence_num"
-                ]
-                != prev_seq + 1
-            ):
-                raise (
-                    SequenceGapError(
-                        f"Gap detected "
-                        f"at "
-                        f"{row['sequence_num']}"
-                    )
-                )
-
-            prev_seq = row["sequence_num"]
-
-            events.append(
-                BaseEvent(
-                    event_id=UUID(row["event_id"]),
-                    schema_version=row["schema_version"],
-                    event_type=(
-                        EventTypeEnum(
-                            row[
-                                "event_type"
-                            ]
-                        )
-                    ),
-                    agent_id=row["agent_id"],
-                    occurred_at=(
-                        datetime
-                        .fromisoformat(
-                            row[
-                                "occurred_at"
-                            ]
-                        )
-                    ),
-                    payload=(
-                        orjson.loads(
-                            row["payload"]
-                        )
-                    ),
-                    checksum=row["checksum"],
-                    sequence_num=row["sequence_num"],
-                )
-            )
-
-        return events
+            return events
 
     def load_events(
         self,
@@ -810,28 +753,28 @@ class SQLiteEventLog:
 
         return list(rows)
 
-    def heal_pending_transactions(self) -> int:
-        """
-        Marks unresolved transactions as corrupted.
-        """
+    # def heal_pending_transactions(self) -> int:
+    #     """
+    #     Marks unresolved transactions as corrupted.
+    #     """
 
-        unresolved = self.get_unresolved_transactions()
+    #     unresolved = self.get_unresolved_transactions()
 
-        healed = 0
+    #     healed = 0
 
-        for row in unresolved:
-            state = row["state"]
-            if state != TransactionStateEnum.PENDING.value:
-                continue
+    #     for row in unresolved:
+    #         state = row["state"]
+    #         if state != TransactionStateEnum.PENDING.value:
+    #             continue
 
-            self._resolve_txn(
-                txn_id=row["txn_id"],
-                state=TransactionStateEnum.CORRUPTED,
-            )
+    #         self._resolve_txn(
+    #             txn_id=row["txn_id"],
+    #             state=TransactionStateEnum.CORRUPTED,
+    #         )
 
-            healed += 1
+    #         healed += 1
 
-        return healed
+    #     return healed
 
     def get_corrupted_event_ids(
         self,
@@ -963,7 +906,7 @@ class SQLiteEventLog:
     ) -> BaseEvent:
 
         return self.append_event(
-            event_type=EventTypeEnum.LIFECYCLE_TRANSITION,
+            event_type=EventTypeEnum.MEMORY_LIFECYCLE_TRANSITION,
             agent_id=agent_id,
             payload=payload.model_dump(mode="json"),
         )

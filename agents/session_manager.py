@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-from memory.models import WorkingMemory
+from memory.working import WorkingMemory
 
 DEFAULT_SESSION_TTL_MINUTES = 60
 DEFAULT_MAX_WORKING_MEMORIES = 25

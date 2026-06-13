@@ -4,6 +4,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import Protocol
 
+from core.exceptions import InvalidContentError
+
 class DedupStore(Protocol):
     """
     Storage abstraction for dedup checks.
@@ -16,15 +18,6 @@ class DedupStore(Protocol):
         content_hash: str,
     ) -> bool:
         ...
-
-class DeduplicationError(Exception):
-    """Base deduplication error."""
-
-
-class InvalidContentError(
-    DeduplicationError
-):
-    """Raised when content invalid."""
 
 @dataclass(slots=True)
 class DeduplicationResult:

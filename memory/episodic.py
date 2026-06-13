@@ -1,127 +1,36 @@
 from __future__ import annotations
-
-import hashlib
-from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
-from memory.models import (
-    BaseMemory,
-    MemoryTypeEnum,
-)
-
-def _content_sha256(content: str) -> str:
-    return hashlib.sha256(content.strip().encode("utf-8")).hexdigest()
-
-
-def _enum_value(value: Any) -> Any:
-    return value.value if hasattr(value, "value") else value
-
+from memory.models import BaseMemory, MemoryTypeEnum, SpeakerRoleEnum
 
 class EpisodicMemory(BaseMemory):
     """
-    Canonical autobiographical memory.
+    Canonical replay memory.
 
-    Episodic memories represent:
-    - experiences
-    - observations
-    - interactions
-    - temporally grounded events
+    Used for:
+    - reconstruct_state_at()
+    - session replay
+    - conversational chronology
+    - reflection clustering
     """
 
-    memory_type: MemoryTypeEnum = MemoryTypeEnum.EPISODIC
-    experienced_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    memory_type: Literal[MemoryTypeEnum.EPISODIC] = (MemoryTypeEnum.EPISODIC)
+    session_id: UUID # groups turns in one session
+    turn_index: int # 0-based; ordered within session
+    speaker_role: SpeakerRoleEnum
+    referenced_memory_ids: list[UUID] = Field(default_factory=list) # explicit cross-refs in this turn
+    emotional_snapshot: Optional[dict[str, Any]] = None
+    is_system_message: bool = False
+    tool_call_id: Optional[str] = None # if speaker_role=TOOL
 
-    source: str | None = None
-    participants: list[str] = Field(default_factory=list)
-    context_window_id: UUID | None = None
-    access_count: int = 0
-    reinforcement_count: int = 0
-
-    def reinforce(self) -> None:
-        """
-        Reinforces episodic memory.
-        """
-
-        self.reinforcement_count += 1
-        self.access_count += 1
-        self.last_accessed_at = datetime.now(timezone.utc)
-
-    def mark_accessed(self) -> None:
-        """
-        Updates retrieval metadata.
-        """
-
-        self.access_count += 1
-        self.last_accessed_at = datetime.now(timezone.utc)
-
-    def to_context_dict(
-        self,
-    ) -> dict[str, Any]:
-        """
-        Replay-safe context serialization.
-        """
-
-        return {
-            "memory_id": str(self.memory_id),
-            "agent_id": self.agent_id,
-            "memory_type": _enum_value(self.memory_type),
-            "content": self.content,
-            "importance_score": self.importance_score,
-            "experienced_at": (
-                self.experienced_at
-                .isoformat()
-            ),
-            "created_at": (
-                self.created_at
-                .isoformat()
-            ),
-            "last_accessed_at": (
-                self.last_accessed_at
-                .isoformat()
-                if self.last_accessed_at
-                else None
-            ),
-            "source": self.source,
-            "participants": self.participants,
-            "access_count": self.access_count,
-            "reinforcement_count": self.reinforcement_count,
-            "metadata": self.metadata,
-        }
-
+    @field_validator("turn_index")
     @classmethod
-    def create(
-        cls,
-        *,
-        memory_id: UUID,
-        agent_id: str,
-        content: str,
-        importance_score: float,
-        metadata: (
-            dict[str, Any]
-            | None
-        ) = None,
-        source: str | None = None,
-    ) -> "EpisodicMemory":
-        """
-        Deterministic episodic constructor.
-        """
-
-        now = datetime.now(timezone.utc)
-
-        return cls(
-            memory_id=memory_id,
-            agent_id=agent_id,
-            memory_type=MemoryTypeEnum.EPISODIC,
-            content=content,
-            sha256=_content_sha256(content),
-            importance_score=importance_score,
-            created_at=now,
-            last_accessed_at=now,
-            experienced_at=now,
-            source=source,
-            metadata=metadata or {},
-        )
+    def validate_turn_index(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("turn_index cannot be negative")
+        
+        return value
 

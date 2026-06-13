@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
 from uuid import UUID
+from core.exceptions import IndexNotInitialisedError, VectorDimensionError, VectorStoreError
 from memory.models import LifecycleStateEnum, MemoryTypeEnum
 from vector.embedder import DEFAULT_DIMENSION
 
@@ -21,18 +22,6 @@ INDEX_CONFIG = {
     MemoryTypeEnum.PROCEDURAL: "procedural",
     MemoryTypeEnum.WORKING: "working",
 }
-
-
-class VectorStoreError(Exception):
-    """Base vector store error."""
-
-
-class VectorDimensionError(VectorStoreError):
-    """Raised when embedding dimension mismatch occurs."""
-
-
-class IndexNotInitialisedError(VectorStoreError):
-    """Raised when index missing."""
 
 class VectorStore(Protocol):
 
@@ -117,8 +106,6 @@ class FAISSStore:
         self.root_path = root_path
         # legacy single-index for compatibility
         self.index: faiss.IndexFlatIP | None = None
-        # named indices for advanced usage
-        self.indices: dict[str, faiss.IndexFlatIP] = {}
         # global metadata map: vector_id -> metadata
         self.metadata: dict[int, dict[str, Any]] = {}
 
@@ -135,23 +122,11 @@ class FAISSStore:
 
         self.root_path.mkdir(parents=True, exist_ok=True)
 
-        if self.index_path.exists():
-            try:
-                self.index = faiss.read_index(str(self.index_path))
-            except Exception:
-                self.index = faiss.IndexFlatIP(VECTOR_DIMENSION)
-        else:
-            self.index = faiss.IndexFlatIP(VECTOR_DIMENSION)
+        base_index = faiss.IndexFlatIP(VECTOR_DIMENSION)
+        self.index = faiss.IndexIDMap(base_index)
 
-        for idx_name in INDEX_CONFIG.values():
-            index_path = self.root_path / f"{idx_name}.faiss"
-            if index_path.exists():
-                try:
-                    self.indices[idx_name] = faiss.read_index(str(index_path))
-                except Exception:
-                    self.indices[idx_name] = self.indices.get(idx_name, faiss.IndexFlatIP(VECTOR_DIMENSION))
-            else:
-                self.indices[idx_name] = faiss.IndexFlatIP(VECTOR_DIMENSION)
+        if self.index_path.exists():
+            faiss.read_index(str(self.index_path))   # already IndexIDMap on disk
 
         if self.metadata_path.exists():
             with open(self.metadata_path, "r", encoding="utf-8") as f:
@@ -175,14 +150,17 @@ class FAISSStore:
 
         faiss.write_index(self.index, str(self.index_path))
 
-        for name, index in self.indices.items():
-            try:
-                faiss.write_index(index, str(self.root_path / f"{name}.faiss"))
-            except Exception:
-                pass
+        try:
+            faiss.write_index(self.index, str(self.index_path))
+        except Exception as exc:
+            raise VectorStoreError(f"Failed to persist FAISS index: {exc}") from exc
+        
+        try:
+            with open(self.metadata_path, "w", encoding="utf-8") as f:
+                json.dump(self.metadata, f, ensure_ascii=True, indent=2)
 
-        with open(self.metadata_path, "w", encoding="utf-8") as f:
-            json.dump(self.metadata, f, ensure_ascii=True, indent=2)
+        except Exception as exc:
+            raise VectorStoreError(f"Failed to persist metadata: {exc}") from exc
 
     def add_embedding(
         self,
@@ -200,23 +178,18 @@ class FAISSStore:
         if self.index is None:
             raise IndexNotInitialisedError("Call load() or initialise() before adding")
 
-        embedding_array = normalise_embedding(embedding)
-        vector_id = int(self.index.ntotal)
-        self.index.add(embedding_array)
-        self.metadata[vector_id] = metadata or {}
-
-        # If memory_type provided, also add to named index (best-effort)
-        if memory_type is not None:
-            try:
-                mtype = _coerce_memory_type(memory_type)
-                name = INDEX_CONFIG.get(mtype)
-                if name and name in self.indices:
-                    self.indices[name].add(embedding_array)
-            except Exception:
-                # don't fail the entire write for index partitioning
-                pass
-
-        return vector_id
+        vector_id = uuid_to_int64(memory_id)
+        self.index.add_with_ids(
+            normalise_embedding(embedding),
+            np.array([vector_id], dtype=np.int64),
+        )
+        self.metadata[vector_id] = {
+            "memory_id": str(memory_id),
+            "agent_id": agent_id,
+            "memory_type": memory_type.value,
+            "lifecycle_state": lifecycle_state.value,
+        }
+        return int(vector_id)
 
     def add_embeddings(
         self,
@@ -261,12 +234,37 @@ class FAISSStore:
             self.metadata[int(vid)] = (metadatas[i] if metadatas is not None else {})
 
         return vector_ids
+    
+    def remove_embedding(
+        self,
+        *,
+        memory_id: UUID
+    ) -> None:
+        
+        vector_id = uuid_to_int64(memory_id)
+        self.index.remove_ids(np.array([vector_id], dtype=np.int64))
+        self.metadata.pop(vector_id, None)
+
+    def update_lifecycle_state(
+        self,
+        *,
+        memory_id: UUID,
+        new_state: LifecycleStateEnum
+    ) -> None:
+        
+        vector_id = uuid_to_int64(memory_id)
+
+        if vector_id not in self.metadata:
+            raise KeyError(f"vector_id {vector_id} not found")
+        
+        self.metadata[vector_id]["lifecycle_state"] = new_state.value
 
     def search(
         self,
         *,
         query_embedding: list[float],
         top_k: int = 10,
+        lifecycle_states: list[LifecycleStateEnum] | None = None
     ) -> list[SearchResult]:
         """Returns top_k nearest vectors with score and metadata."""
 
@@ -281,14 +279,21 @@ class FAISSStore:
         distances, ids = self.index.search(query, k)
 
         results: list[SearchResult] = []
+        allowed = {s.value for s in lifecycle_states} if lifecycle_states else None
+
         for score, vector_id in zip(distances[0], ids[0]):
             if vector_id < 0:
                 continue
+            meta = self.metadata.get(int(vector_id), {})
+
+            if allowed is not None and meta.get("lifecycle_state") not in allowed:
+                continue
+
             results.append(
                 SearchResult(
                     vector_id=int(vector_id),
                     score=float(score),
-                    metadata=self.metadata.get(int(vector_id), {}),
+                    metadata=meta,
                 )
             )
 
@@ -350,7 +355,6 @@ class FAISSStore:
         Clears all indices.
         """
 
-        self.indices.clear()
         self.metadata.clear()
 
         self.initialise()
@@ -362,9 +366,6 @@ class FAISSStore:
 
         return {
             "total_vectors": len(self.metadata),
-            "indices": {
-                name: index.ntotal
-                for name, index in self.indices.items()
-            },
+            "index": self.index.ntotal
         }
 

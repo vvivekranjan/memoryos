@@ -4,22 +4,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any
-
-from memory.models import RetrievalTrace
-
 if TYPE_CHECKING:
-    from memory.models import BaseMemory, RetrievalTrace
-else:
-    BaseMemory = Any
-
-
-@dataclass(slots=True)
-class _MemoryResult:
-    memory: BaseMemory
-    trace: RetrievalTrace
-
-
-MemoryResult = _MemoryResult
+    from retrieval.engine import MemoryResult, RetrievalTrace
 
 @dataclass(slots=True)
 class ContextBlock:

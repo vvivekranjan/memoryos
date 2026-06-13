@@ -15,10 +15,10 @@ import numpy as np
 
 from memory.models import (
     BaseMemory,
-    RetrievalCandidate,
     SessionScope,
 )
 
+from retrieval.engine import RetrievalCandidate
 
 @dataclass(slots=True)
 class VectorSearchResult:
@@ -264,21 +264,6 @@ class Schedulable(Protocol):
     """
 
     async def run(self) -> None:
-        ...
-
-
-class GraphStore(Protocol):
-    """
-    Graph relationship abstraction.
-    """
-
-    async def bfs_traversal_async(
-        self,
-        *,
-        seeds: list[str],
-        max_hops: int = 2,
-        limit: int = 50,
-    ) -> list[dict[str, Any]]:
         ...
 
 

@@ -4,12 +4,7 @@ from dataclasses import dataclass
 
 import re
 
-class ChunkingError(Exception):
-    """Base chunking error."""
-
-
-class EmptyChunkError(ChunkingError):
-    """Raised when chunk generation fails."""
+from core.exceptions import ChunkingError, EmptyChunkError
 
 @dataclass(slots=True)
 class Chunk:

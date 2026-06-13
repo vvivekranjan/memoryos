@@ -1,10 +1,26 @@
 from typing import List
-from memory.models import RetrievalCandidate
+from uuid import UUID
+from .engine import RetrievalCandidate
 from memory.models import SessionScope
+
+try:
+    import kuzu  # type: ignore
+except ImportError:  # pragma: no cover
+    kuzu = None  # type: ignore
+
+DECAY_PER_HOP = 0.5 # configurable in config.yaml
+SESSION_TTL_S = 3600 # activation resets on session end
 
 class SpreadingActivation:
     def __init__(self):
         pass
+
+    # def propagate(memory_id: UUID, depth: int = 2):
+    #     for hop in range(1, depth + 1):
+    #         neighbours = kuzu.bfs(memory_id, hops=hop)
+    #         boost = DECAY_PER_HOP ** hop
+    #         for n in neighbours:
+    #             session_activation[n.memory_id] += boost
         
     def apply(self, candidates: List[RetrievalCandidate], session_scope: SessionScope) -> None:
         """Boosts graph-adjacent memories within current session scope."""

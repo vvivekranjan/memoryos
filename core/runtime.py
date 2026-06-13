@@ -34,7 +34,7 @@ class RuntimePaths:
             duckdb_path=data_dir / "memory.duckdb",
             faiss_dir=data_dir / "faiss",
             events_path=data_dir / "events.sqlite",
-            graph_dir=data_dir / "graph" / "memory_graph",
+            graph_dir=data_dir / "graph" / "memory_graph.kuzu",
         )
 
 
@@ -84,7 +84,7 @@ def build_runtime(
     orchestrator = StorageOrchestrator(
         duckdb_store=duckdb_store,
         faiss_store=faiss_store,
-        event_log=event_log,
+        sqlite_log=event_log,
         graph_store=graph_store,
     )
     deduplicator = Deduplicator(store=duckdb_store)

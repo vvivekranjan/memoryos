@@ -11,11 +11,11 @@ from ingestion.preprocessor import Preprocessor
 from ingestion.multimodal_router import MultimodalRouter
 from memory.models import (
     BaseMemory,
-    EpisodicMemory,
     MemoryTypeEnum,
     SpeakerRoleEnum,
-    WorkingMemory,
 )
+from memory.episodic import EpisodicMemory
+from memory.working import WorkingMemory
 from vector.embedder import Embedder
 from ingestion.chunker import Chunker, Chunk
 from ingestion.deduplicator import DedupStore, Deduplicator

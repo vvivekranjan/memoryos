@@ -13,33 +13,26 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from core.exceptions import DuplicateMemoryError, InvalidLifecycleTransitionError, MemoryNotFoundError
 from memory.models import (
     BaseMemory,
-    EpisodicMemory,
     LifecycleStateEnum,
     ModalityEnum,
-    ProceduralMemory,
     ProvenanceEnum,
-    SemanticMemory,
-    WorkingMemory,
     MemoryTypeEnum,
     SpeakerRoleEnum,
 )
+
+from memory.episodic import EpisodicMemory
+from memory.working import WorkingMemory
+from memory.semantic import SemanticMemory
+from memory.procedural import ProceduralMemory
 
 # ============================================================
 # CONSTANTS
 # ============================================================
 
 DB_PATH = Path("data/memory.duckdb")
-
-class DuplicateMemoryError(Exception):
-    pass
-
-class MemoryNotFoundError(Exception):
-    pass
-
-class InvalidLifecycleTransitionError(Exception):
-    pass
 
 # ============================================================
 # SQL
@@ -176,7 +169,12 @@ ON memories(agent_id);
 
 CREATE_TYPE_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_memories_type
-ON memories(memory_type);
+ON memories(memory_type, agent_id);
+"""
+
+CREATE_LIFECYCLE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_mem_lifecycle
+ON memories(lifecycle_state, agent_id);
 """
 
 CREATE_CREATED_INDEX = """
@@ -186,7 +184,7 @@ ON memories(created_at);
 
 CREATE_IMPORTANCE_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_memories_importance
-ON memories(importance_score);
+ON memories(importance_score DESC);
 """
 
 CREATE_SHA256_INDEX = """
@@ -484,7 +482,7 @@ class DuckDBStore:
                 # Semantic
                 # =================================================
 
-                if isinstance(memory, SemanticMemory):
+                elif isinstance(memory, SemanticMemory):
 
                     conn.execute(
                         """
@@ -498,7 +496,7 @@ class DuckDBStore:
                             object_type,
                             source_url,
                             contradicted_by,
-                            promoted_from,
+                            promoted_from
                         )
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
@@ -564,7 +562,7 @@ class DuckDBStore:
                                 ]
                             ),
 
-                            str(memory.domain),
+                            memory.domain,
                         ],
                     )
             
@@ -990,10 +988,10 @@ class DuckDBStore:
                 [agent_id, *map(str, memory_ids)],
             ).fetchall()
 
-        return [
-            self.get_memory(coerce_uuid(row[0]))
-            for row in rows
-        ]
+        return await asyncio.to_thread(
+            lambda rows: [self.get_memory(coerce_uuid(r[0])) for r in rows],
+            rows
+        )
 
     def projection_exists(
         self,
