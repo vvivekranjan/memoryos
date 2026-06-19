@@ -79,7 +79,8 @@ def build_runtime(
     faiss_store.load()
 
     event_log = SQLiteEventLog(db_path=runtime_paths.events_path)
-    graph_store = KuzuDBStore(db_path=runtime_paths.graph_dir)
+    graph_store = KuzuDBStore(db_path=str(runtime_paths.graph_dir))
+    graph_store.initialise()
 
     orchestrator = StorageOrchestrator(
         duckdb_store=duckdb_store,

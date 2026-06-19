@@ -2,20 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import kuzu
 
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, override
 
-
-try:
-    import kuzu  # type: ignore
-except ImportError:  # pragma: no cover
-    kuzu = None  # type: ignore
-
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DB_PATH = Path("data/graph/memory_graph.kuzu")
 
@@ -59,7 +52,7 @@ _DDL_STATEMENTS: list[str] = [
     """
     CREATE REL TABLE IF NOT EXISTS COOCCURS (
         FROM Entity TO Entity,
-        cooccurrence_count  INTEGER DEFAULT 1,
+        cooccurrence_count  INT64 DEFAULT 1,
         last_seen           STRING
     )
     """,
@@ -89,7 +82,7 @@ class KuzuDBStore:
     """
 
     def __init__(self, db_path: str = DB_PATH) -> None:
-        self._db_path = db_path
+        self._db_path = str(db_path)
         self._conn: Any | None = None
         self._initialised: bool = False
 
@@ -102,7 +95,7 @@ class KuzuDBStore:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def initialise(self) -> None:
+    def initialise(self) -> None:
         """Connect to KuzuDB and run DDL bootstrap. Idempotent."""
         if self._initialised:
             return
@@ -125,12 +118,13 @@ class KuzuDBStore:
             return
 
         try:
-            db = kuzu.Database(self._db_path)
+            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+            db = kuzu.Database(str(self._db_path))
             self._conn = kuzu.Connection(db)
         except Exception as exc:
             logger.warning(
                 "graph.ontology | KuzuDB connection failed — "
-                "falling back to dev-mode in-memory mirrors | error={}", exc
+                "falling back to dev-mode in-memory mirrors | error=%s", exc
             )
             # _initialised stays False; caller will get degraded behaviour.
             return
@@ -143,7 +137,7 @@ class KuzuDBStore:
             except Exception as exc:
                 logger.warning(
                     "graph.ontology | DDL failed — partial schema | "
-                    "stmt_preview={!r} | error={}",
+                    "stmt_preview=%r | error=%s",
                     stmt.strip()[:80],
                     exc,
                 )
@@ -244,13 +238,36 @@ class KuzuDBStore:
                 n.importance   = $importance,
                 n.created_at   = $created_at
         """
+        
+        # KuzuDB throws an error if unused parameters are passed
+        query_params = {k: v for k, v in props.items() if k != "metadata_json"}
+
         try:
-            self._conn.execute(cypher, parameters=props)
+            self._conn.execute(cypher, parameters=query_params)
         except Exception as exc:
             logger.warning(
                 "graph.ontology | KuzuDB node upsert failed — "
-                "graph diverges from DuckDB | memory_id={} | error={}",
-                node_id, exc,
+                "graph diverges from DuckDB | memory_id=%s | error=%s",
+                node_id,
+                exc,
+            )
+
+    async def delete_memory(self, memory_id: str) -> None:
+        """
+        Delete a memory (Entity node) and all associated edges from KuzuDB.
+        """
+        if self._conn is None:
+            self._nodes.pop(memory_id, None)
+            return
+
+        cypher = "MATCH (n:Entity {node_id: $node_id}) DETACH DELETE n"
+        try:
+            self._conn.execute(cypher, parameters={"node_id": memory_id})
+        except Exception as exc:
+            logger.warning(
+                "graph.ontology | KuzuDB node deletion failed | memory_id=%s | error=%s",
+                memory_id,
+                exc,
             )
 
     async def save_edge(
@@ -296,7 +313,7 @@ class KuzuDBStore:
         except Exception as exc:
             logger.warning(
                 "graph.ontology | KuzuDB edge insert failed | "
-                "from={} to={} rel={} | error={}",
+                "from=%s to=%s rel=%s | error=%s",
                 from_id, to_id, rel_table, exc,
             )
 
@@ -400,23 +417,24 @@ class KuzuDBStore:
     ) -> list[dict[str, Any]]:
         """BFS via KuzuDB Cypher"""
         cypher = f"""
-            MATCH path = (start:Entity)-[:RELATES*1..{max_hops}]->(end:Entity)
+            MATCH (start:Entity)-[r:RELATES*1..{max_hops}]->(target:Entity)
             WHERE start.node_id IN $seeds
             RETURN start.node_id  AS start_id,
-                   end.node_id    AS end_id,
-                   length(path)   AS hop
+                   target.node_id AS end_id,
+                   length(r)      AS hop
             LIMIT {limit}
         """
         try:
             result = self._conn.execute(cypher, parameters={"seeds": seeds})
-            df = result.get_as_df() if hasattr(result, "get_as_df") else None
-            if df is None or df.empty:
-                return []
-            return df.to_dict(orient="records")
+            cols = result.get_column_names()
+            records = []
+            while result.has_next():
+                records.append(dict(zip(cols, result.get_next())))
+            return records
         except Exception as exc:
             logger.warning(
                 "graph.ontology | BFS KuzuDB query failed | "
-                "seeds={} max_hops={} | error={}", seeds, max_hops, exc,
+                "seeds=%s max_hops=%s | error=%s", seeds, max_hops, exc,
             )
             return []
 

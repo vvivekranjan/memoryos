@@ -162,6 +162,50 @@ CREATE TABLE IF NOT EXISTS procedural_memories (
 );
 """
 
+CREATE_ISOLATED_TABLE = """
+CREATE TABLE IF NOT EXISTS isolated_memories (
+    memory_id UUID PRIMARY KEY,
+
+    schema_version VARCHAR NOT NULL,
+    memory_type VARCHAR NOT NULL,
+
+    agent_id VARCHAR NOT NULL,
+
+    content TEXT NOT NULL,
+    sha256 VARCHAR NOT NULL,
+    modality VARCHAR NOT NULL,
+
+    lifecycle_state VARCHAR NOT NULL,
+
+    created_at TIMESTAMP NOT NULL,
+    last_accessed_at TIMESTAMP NOT NULL,
+
+    access_count INTEGER NOT NULL,
+
+    decay_anchor TIMESTAMP NOT NULL,
+    decay_multiplier DOUBLE NOT NULL,
+
+    importance_score DOUBLE NOT NULL,
+    salience_score DOUBLE NOT NULL,
+
+    vad_v DOUBLE,
+    vad_a DOUBLE,
+    vad_d DOUBLE,
+
+    emotional_class VARCHAR,
+
+    provenance VARCHAR NOT NULL,
+    provenance_confidence DOUBLE NOT NULL,
+
+    graph_node_id VARCHAR,
+
+    forward_ref UUID,
+
+    tags JSON,
+    metadata JSON
+);
+"""
+
 CREATE_AGENT_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_memories_agent
 ON memories(agent_id);
@@ -234,14 +278,14 @@ class DuckDBStore:
         db_path: Path = DB_PATH
     ):
         self.db_path = db_path
-
-    def _connect(self) -> duckdb.DuckDBPyConnection:
         self.db_path.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
+        self._conn = duckdb.connect(str(self.db_path))
 
-        return duckdb.connect(str(self.db_path))
+    def _connect(self) -> duckdb.DuckDBPyConnection:
+        return self._conn.cursor()
 
     async def content_hash_exists(
         self,
@@ -265,6 +309,7 @@ class DuckDBStore:
     def initialise(self) -> None:
         with self._connect() as conn:
             conn.execute(CREATE_MEMORIES_TABLE)
+            conn.execute(CREATE_ISOLATED_TABLE)
             conn.execute(CREATE_EPISODIC_TABLE)
             conn.execute(CREATE_WORKING_TABLE)
             conn.execute(CREATE_SEMANTIC_TABLE)
@@ -288,6 +333,24 @@ class DuckDBStore:
         No event logging here.
         """
 
+        self._insert_into_table("memories", memory)
+
+    def insert_isolated_memory(
+        self,
+        memory: BaseMemory,
+    ) -> None:
+        """
+        Inserts memory into isolated store for hallucination firewall.
+        """
+
+        self._insert_into_table("isolated_memories", memory)
+
+    def _insert_into_table(
+        self,
+        table_name: str,
+        memory: BaseMemory,
+    ) -> None:
+
         with self._connect() as conn:
 
             conn.begin()
@@ -295,9 +358,9 @@ class DuckDBStore:
             try:
 
                 existing = conn.execute(
-                    """
+                    f"""
                     SELECT memory_id
-                    FROM memories
+                    FROM {table_name}
                     WHERE memory_id = ?
                     """,
                     [str(memory.memory_id)],
@@ -309,8 +372,8 @@ class DuckDBStore:
                     )
                 
                 conn.execute(
-                    """
-                    INSERT INTO memories (
+                    f"""
+                    INSERT INTO {table_name} (
                         memory_id,
                         schema_version,
                         memory_type,
@@ -572,6 +635,29 @@ class DuckDBStore:
                 conn.rollback()
                 raise
     
+    def delete_memory(
+        self,
+        memory_id: UUID,
+    ) -> None:
+        """
+        Deletes a memory across all type tables and the base memories table.
+        """
+        mid_str = str(memory_id)
+        
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN TRANSACTION")
+                conn.execute("DELETE FROM episodic_memories WHERE memory_id = ?", [mid_str])
+                conn.execute("DELETE FROM working_memories WHERE memory_id = ?", [mid_str])
+                conn.execute("DELETE FROM semantic_memories WHERE memory_id = ?", [mid_str])
+                conn.execute("DELETE FROM procedural_memories WHERE memory_id = ?", [mid_str])
+                conn.execute("DELETE FROM memories WHERE memory_id = ?", [mid_str])
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                raise RuntimeError(f"Failed to delete memory: {exc}") from exc
+
+
 
     def get_memory(
         self,

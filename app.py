@@ -10,10 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-try:
-    from openrouter import OpenRouter
-except ImportError:  # pragma: no cover - optional runtime dependency
-    OpenRouter = None  # type: ignore[assignment]
+from openrouter import OpenRouter
 
 from core.config import MemoryConfig
 from main import Memory
@@ -120,7 +117,13 @@ def build_client() -> OpenRouter | None:
     )
 
 
-def ask_llm(client: OpenRouter | None, *, user_prompt: str, context: str) -> str:
+def ask_llm(
+    client: OpenRouter | None,
+    *,
+    user_prompt: str,
+    context: str,
+    system_prompt: str = SYSTEM_INSTRUCTION,
+) -> str:
     """Send a single chat request and return the generated text."""
 
     if client is None:
@@ -133,7 +136,7 @@ def ask_llm(client: OpenRouter | None, *, user_prompt: str, context: str) -> str
         return "OpenRouter is not configured and no relevant context was found."
 
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": SYSTEM_INSTRUCTION},
+        {"role": "system", "content": system_prompt},
     ]
 
     if context.strip() and context != "No relevant context was found.":

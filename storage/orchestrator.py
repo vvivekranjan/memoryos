@@ -26,19 +26,15 @@ from memory.models import (
     IngestionPayload,
     RetrievalPayload,
     ProvenanceEnum,
+    EventTypeEnum,
 )
 from storage.duckdb_store import DuckDBStore, MemoryNotFoundError
 from storage.faiss_store import FAISSStore
 from storage.sqlite_log import SQLiteEventLog
 from graph.ontology import KuzuDBStore
+from storage.hallucination_firewall import HallucinationFirewall
 
 logger = logging.getLogger(__name__)
-
-_FIREWALL_ISOLATED: frozenset[str] = frozenset({
-    ProvenanceEnum.IMAGINED.value,
-    ProvenanceEnum.HYPOTHESISED.value,
-})
-
 
 class EventLog(Protocol):
     def log_ingestion(self, *, agent_id: str, payload: IngestionPayload) -> BaseEvent:
@@ -97,26 +93,7 @@ class StorageOrchestrator:
         self.faiss = faiss_store
         self.event_log = sqlite_log
         self.graph = graph_store
-
-    def _enforce_firewall(self, memory: BaseMemory) -> None:
-        """
-        Raises FirewallViolationError if violated; callers MUST NOT catch and
-        continue — the violation must propagate.
-        """
-        provenance = getattr(memory, "provenance", None)
-        if provenance is None:
-            return
-        prov_value = (
-            provenance.value
-            if hasattr(provenance, "value")
-            else str(provenance)
-        )
-        if prov_value in _FIREWALL_ISOLATED:
-            raise FirewallViolationError(
-                f"Firewall violation: provenance={prov_value!r} memory "
-                f"(memory_id={memory.memory_id}) may not be written to the "
-                f"standard memories table. Route via isolated store."
-            )
+        self.firewall = HallucinationFirewall(self.duckdb)
 
     # ------------------------------------------------------------------
     # WorkingMemory guards
@@ -186,13 +163,20 @@ class StorageOrchestrator:
         """
         # ---- Guard: firewall ----
         try:
-            self._enforce_firewall(memory)
-        except FirewallViolationError:
+            routed_to_isolation = self.firewall.enforce_ingestion_routing(memory)
+            if routed_to_isolation:
+                logger.info(
+                    "storage.orchestrator | memory routed to isolated store "
+                    "memory_id={} provenance={}",
+                    memory.memory_id,
+                    getattr(memory, "provenance", "?"),
+                )
+                return TransactionResult(success=True, rollback_performed=False, error="Routed to isolated store")
+        except Exception as exc:
             logger.error(
-                "storage.orchestrator | firewall violation rejected "
-                "memory_id={} provenance={}",
-                memory.memory_id,
-                getattr(memory, "provenance", "?"),
+                "storage.orchestrator | firewall routing error "
+                "memory_id={} error={}",
+                memory.memory_id, exc,
             )
             raise  # Must not be caught and continued.
 
@@ -426,6 +410,59 @@ class StorageOrchestrator:
 
         # Step 2: DuckDB state update.
         self.duckdb.apply_lifecycle_transition(memory_id, new_state)
+
+    async def forget_memory(self, memory_id: UUID) -> TransactionResult:
+        """
+        Coordinated multi-store deletion across SQLite, DuckDB, FAISS, and KuzuDB.
+        """
+        try:
+            memory = self.duckdb.get_memory(memory_id)
+        except MemoryNotFoundError:
+            return TransactionResult(
+                success=False, 
+                rollback_performed=False, 
+                error=f"Memory {memory_id} not found"
+            )
+
+        # Step 1: Append a PRUNED event to SQLite (INV-RC-001)
+        try:
+            self.event_log.append_event(
+                event_type=EventTypeEnum.MEMORY_PRUNED,
+                agent_id=memory.agent_id,
+                payload={"memory_id": str(memory_id)}
+            )
+        except Exception as exc:
+            return TransactionResult(
+                success=False,
+                rollback_performed=False,
+                error=f"SQLite event log failure: {exc}"
+            )
+
+        # Step 2: Delete from DuckDB
+        try:
+            self.duckdb.delete_memory(memory_id)
+        except Exception as exc:
+            logger.error("storage.orchestrator | duckdb deletion failed | memory_id=%s | error=%s", memory_id, exc)
+            return TransactionResult(
+                success=False,
+                rollback_performed=False,
+                error=f"DuckDB deletion failed: {exc}"
+            )
+
+        # Step 3: Delete from FAISS
+        try:
+            self.faiss.remove_embedding(memory_id=memory_id)
+        except Exception as exc:
+            logger.warning("storage.orchestrator | faiss deletion failed | memory_id=%s | error=%s", memory_id, exc)
+
+        # Step 4: Delete from KuzuDB
+        if self.graph is not None:
+            try:
+                await self.graph.delete_memory(str(memory_id))
+            except Exception as exc:
+                logger.warning("storage.orchestrator | graph deletion failed | memory_id=%s | error=%s", memory_id, exc)
+
+        return TransactionResult(success=True)
 
     # ------------------------------------------------------------------
     # Replay rebuild (disaster recovery stub)

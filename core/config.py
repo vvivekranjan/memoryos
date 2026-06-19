@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-PROMPT_PATH = Path(__file__).resolve().parents[1] / ".skills" / "SYSTEM_PROMPT.txt"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / ".skills" / "SYSTEM_PROMPT.md"
 
 class MemoryConfig:
     data_dir: str = "data"

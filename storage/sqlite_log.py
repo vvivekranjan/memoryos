@@ -911,6 +911,30 @@ class SQLiteEventLog:
             payload=payload.model_dump(mode="json"),
         )
 
+    def snapshot(
+        self,
+        output_path: Path,
+        since: datetime | None = None,
+        verify: bool = True,
+    ) -> None:
+        """
+        Export the SQLite event log to a portable snapshot file.
+        """
+        if since is not None:
+            raise NotImplementedError("Partial snapshots using 'since' are not yet supported")
+
+        if verify:
+            corrupted = self.get_corrupted_event_ids()
+            if corrupted:
+                raise EventLogCorruptionError(
+                    f"Checksum validation failed for {len(corrupted)} events. Snapshot aborted."
+                )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(output_path) as dst:
+            with self._lock:
+                self.conn.backup(dst)
+
     def close(self) -> None:
         """
         Graceful shutdown.

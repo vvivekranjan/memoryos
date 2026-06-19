@@ -126,7 +126,7 @@ class FAISSStore:
         self.index = faiss.IndexIDMap(base_index)
 
         if self.index_path.exists():
-            faiss.read_index(str(self.index_path))   # already IndexIDMap on disk
+            self.index = faiss.read_index(str(self.index_path))   # already IndexIDMap on disk
 
         if self.metadata_path.exists():
             with open(self.metadata_path, "r", encoding="utf-8") as f:
