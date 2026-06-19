@@ -1,6 +1,6 @@
 import asyncio
 from pathlib import Path
-from agents.memory_client import MemoryClient
+from memoryos.agents.memory_client import MemoryClient
 
 async def main():
     print("Testing forget and snapshot...")

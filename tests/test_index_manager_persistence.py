@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import numpy as np
 
-from vector.index_manager import IndexManager
+from memoryos.vector.index_manager import IndexManager
 
 
 def make_mem(memory_type: str, days_old: int = 0, tzaware: bool = True):

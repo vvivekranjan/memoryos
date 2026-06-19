@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 import os
 import shutil
 
-from storage.duckdb_store import DuckDBStore
-from storage.orchestrator import StorageOrchestrator
-from memory.episodic import EpisodicMemory
-from memory.models import SpeakerRoleEnum, ModalityEnum, LifecycleStateEnum, ProvenanceEnum
+from memoryos.storage.duckdb_store import DuckDBStore
+from memoryos.storage.orchestrator import StorageOrchestrator
+from memoryos.memory.episodic import EpisodicMemory
+from memoryos.memory.models import SpeakerRoleEnum, ModalityEnum, LifecycleStateEnum, ProvenanceEnum
 
 @pytest.fixture
 def test_db_path(tmp_path):

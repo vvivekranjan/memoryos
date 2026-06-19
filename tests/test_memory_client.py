@@ -11,9 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agents.memory_client import MemoryClient, IngestResult, RetrieveResult
-from agents.context_builder import ContextBuilder
-from agents.session_manager import SessionManager
+from memoryos.agents.memory_client import MemoryClient, IngestResult, RetrieveResult
+from memoryos.agents.context_builder import ContextBuilder
+from memoryos.agents.session_manager import SessionManager
 
 class DummyPipeline:
     def __init__(self, result=None):

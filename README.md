@@ -1,8 +1,8 @@
-# AIMemory
+# MemoryOS
 
 A powerful, modular, multi-store memory layer for conversational agents and LLM applications. 
 
-AIMemory combines vector retrieval, graph knowledge bases, and highly-durable structured storage to give your AI agents a robust, scalable long-term memory.
+MemoryOS combines vector retrieval, graph knowledge bases, and highly-durable structured storage to give your AI agents a robust, scalable long-term memory that you can plug and play directly into your own applications.
 
 ## Features
 
@@ -17,30 +17,30 @@ AIMemory combines vector retrieval, graph knowledge bases, and highly-durable st
 
 ## Installation
 
-This project uses Python 3.12+ and [`uv`](https://github.com/astral-sh/uv) (or standard `pip`).
+MemoryOS relies on powerful machine learning models under the hood. Make sure you have at least 2GB of free disk space before installing, as it will download heavy dependencies like PyTorch, FAISS, and HuggingFace Transformers.
 
-```powershell
-# 1. Clone the repository
-git clone https://github.com/your-org/aimemory.git
-cd aimemory
+Install MemoryOS via pip directly into your project:
 
-# 2. Setup your virtual environment
-uv venv
-.venv\Scripts\activate
+```bash
+pip install memoryos
+```
 
-# 3. Install dependencies
-uv pip install -r pyproject.toml # or standard pip install
+After installation, you must download the default SpaCy NLP model used for entity extraction:
+
+```bash
+python -m spacy download en_core_web_sm
 ```
 
 ---
 
 ## Quickstart (Plug & Play)
 
-The easiest way to integrate AIMemory into your codebase is by using the `MemoryClient` (available via the `Memory` facade in `main.py`).
+The easiest way to integrate MemoryOS into your codebase is by using the `Memory` facade. Simply import it into your application and start saving/retrieving knowledge.
 
 ```python
 import asyncio
-from main import Memory
+from pathlib import Path
+from memoryos import Memory
 
 async def run():
     # Initialize the high-level memory facade
@@ -66,65 +66,49 @@ async def run():
         print(f"[{r['score']:.2f}] {r['metadata']['content']}")
 
     # 3. Forget a memory across all stores (DuckDB, FAISS, Graph, SQLite)
-    memory_id = results[0]["metadata"]["memory_id"]
-    await memory.forget(memory_id=memory_id)
+    if results:
+        memory_id = results[0]["metadata"]["memory_id"]
+        await memory.forget(memory_id=memory_id)
     
     # 4. Take a verifiable snapshot of the entire event history
-    from pathlib import Path
     await memory.snapshot(output_path=Path("backups/memory_snapshot.sqlite"))
 
 if __name__ == "__main__":
     asyncio.run(run())
 ```
 
-### Try the Interactive CLI App
-
-We include a built-in CLI app that wires up AIMemory directly to an LLM so you can talk to an agent that actually remembers!
-
-```powershell
-# First, configure OpenRouter or your LLM API keys:
-$env:OPENROUTER_API_KEY="sk-or-..."
-
-# Run the app
-python app.py
-```
-*(If no OpenRouter key is provided, the CLI will gracefully degrade into a retrieval-only mode).*
-
 ---
 
 ## Configuration
 
-By default, runtime databases and indexes are stored in `data/`. You can override this globally:
+By default, runtime databases and indexes are stored in the `.memoryos/` folder at the root of the installed package. You can easily override this globally if you want your data saved elsewhere:
 
-```powershell
-$env:MEMORYOS_DATA_DIR="custom-data"
-```
-
-For LLM-powered context generation in `app.py`, configure:
-
-```powershell
-$env:OPENROUTER_API_KEY="..."
-$env:OPENROUTER_MODEL="openai/gpt-4o-mini"
+```bash
+export MEMORYOS_DATA_DIR="/path/to/custom/data"
 ```
 
 ---
 
-## Project Layout
+## Architecture / Project Layout
+
+For those interested in extending the SDK or contributing, the folder architecture is maintained as follows:
 
 - `agents/`: SDK-facing components. Contains `MemoryClient`, which is the primary unified interface to the ecosystem.
 - `main.py`: A lightweight, backwards-compatible wrapper around `MemoryClient` for immediate plug-and-play.
-- `app.py`: Interactive CLI chatbot demo.
 - `core/runtime.py`: The composition root. Handles dependency injection, configuration, and instantiating storage/retrieval services.
 - `ingestion/`: Text preprocessing, SHA deduplication, routing, and chunking boundaries.
 - `retrieval/`: Similarity search, vector reranking, and `ContextBuilder` logic.
 - `storage/`: Highly durable persistence backends (`duckdb_store.py`, `faiss_store.py`, `sqlite_log.py`) and the `orchestrator.py`.
 - `vector/`: Embedding generation (`sentence-transformers`) and model management.
 - `graph/`: KuzuDB ontology and schema definitions.
-- `tests/`: End-to-end and unit regression test suites.
 
 ## Contributing
 
-```powershell
-# Run the test suite
+We welcome contributions! To set up for local development:
+
+```bash
+git clone https://github.com/your-org/memoryos.git
+cd memoryos
+pip install -e .
 pytest -q
 ```
