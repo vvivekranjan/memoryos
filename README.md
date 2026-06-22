@@ -1,8 +1,8 @@
-# MemoryOS
+# AIMemoryOS
 
 A powerful, modular, multi-store memory layer for conversational agents and LLM applications. 
 
-MemoryOS combines vector retrieval, graph knowledge bases, and highly-durable structured storage to give your AI agents a robust, scalable long-term memory that you can plug and play directly into your own applications.
+AIMemoryOS combines vector retrieval, graph knowledge bases, and highly-durable structured storage to give your AI agents a robust, scalable long-term memory that you can plug and play directly into your own applications.
 
 ## Features
 
@@ -17,12 +17,12 @@ MemoryOS combines vector retrieval, graph knowledge bases, and highly-durable st
 
 ## Installation
 
-MemoryOS relies on powerful machine learning models under the hood. Make sure you have at least 2GB of free disk space before installing, as it will download heavy dependencies like PyTorch, FAISS, and HuggingFace Transformers.
+AIMemoryOS relies on powerful machine learning models under the hood. Make sure you have at least 2GB of free disk space before installing, as it will download heavy dependencies like PyTorch, FAISS, and HuggingFace Transformers.
 
-Install MemoryOS via pip directly into your project:
+Install AIMemoryOS via pip directly into your project:
 
 ```bash
-pip install memoryos
+pip install aimemoryos
 ```
 
 After installation, you must download the default SpaCy NLP model used for entity extraction:
@@ -35,12 +35,12 @@ python -m spacy download en_core_web_sm
 
 ## Quickstart (Plug & Play)
 
-The easiest way to integrate MemoryOS into your codebase is by using the `Memory` facade. Simply import it into your application and start saving/retrieving knowledge.
+The easiest way to integrate AIMemoryOS into your codebase is by using the `Memory` facade. Simply import it into your application and start saving/retrieving knowledge.
 
 ```python
 import asyncio
 from pathlib import Path
-from memoryos import Memory
+from aimemoryos import Memory
 
 async def run():
     # Initialize the high-level memory facade
@@ -81,10 +81,10 @@ if __name__ == "__main__":
 
 ## Configuration
 
-By default, runtime databases and indexes are stored in the `.memoryos/` folder at the root of the installed package. You can easily override this globally if you want your data saved elsewhere:
+By default, runtime databases and indexes are stored in the `.aimemoryos/` folder at the root of the installed package. You can easily override this globally if you want your data saved elsewhere:
 
 ```bash
-export MEMORYOS_DATA_DIR="/path/to/custom/data"
+export AIMEMORYOS_DATA_DIR="/path/to/custom/data"
 ```
 
 ---
@@ -107,8 +107,8 @@ For those interested in extending the SDK or contributing, the folder architectu
 We welcome contributions! To set up for local development:
 
 ```bash
-git clone https://github.com/your-org/memoryos.git
-cd memoryos
+git clone https://github.com/your-org/aimemoryos.git
+cd aimemoryos
 pip install -e .
 pytest -q
 ```
