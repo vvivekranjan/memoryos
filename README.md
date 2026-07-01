@@ -17,6 +17,9 @@ AIMemoryOS combines vector retrieval, graph knowledge bases, and highly-durable 
 
 ## Installation
 
+> [!IMPORTANT]
+> **Python Version Requirement**: AIMemoryOS depends on heavy AI libraries (like SpaCy, NumPy, and PyTorch) that require pre-compiled C++ binaries. You **must** use a stable Python version (**Python 3.10, 3.11, or 3.12**) to install this package successfully. Pre-release or cutting-edge versions (like Python 3.13+) will fail to compile.
+
 AIMemoryOS relies on powerful machine learning models under the hood. Make sure you have at least 2GB of free disk space before installing, as it will download heavy dependencies like PyTorch, FAISS, and HuggingFace Transformers.
 
 Install AIMemoryOS via pip directly into your project:
@@ -25,7 +28,7 @@ Install AIMemoryOS via pip directly into your project:
 pip install aimemoryos
 ```
 
-After installation, you must download the default SpaCy NLP model used for entity extraction:
+The `aimemoryos` package will automatically install the `spacy` library for you. However, after installation, you must download the actual **English NLP model weights** (which pip cannot bundle) used for entity extraction:
 
 ```bash
 python -m spacy download en_core_web_sm
