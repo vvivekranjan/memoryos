@@ -22,15 +22,34 @@ AIMemoryOS combines vector retrieval, graph knowledge bases, and highly-durable 
 
 AIMemoryOS relies on powerful machine learning models under the hood. Make sure you have at least 2GB of free disk space before installing, as it will download heavy dependencies like PyTorch, FAISS, and HuggingFace Transformers.
 
-Install AIMemoryOS via pip directly into your project:
+### Step-by-step Installation
 
+**Step 1: Create a safe virtual environment**  
+We highly recommend using a virtual environment strictly locked to a stable Python version. We suggest using [uv](https://docs.astral.sh/uv/) for incredibly fast and foolproof environment isolation:
 ```bash
-pip install aimemoryos
+# Create a Python 3.12 virtual environment
+uv venv --python 3.12
 ```
 
-The `aimemoryos` package will automatically install the `spacy` library for you. However, after installation, you must download the actual **English NLP model weights** (which pip cannot bundle) used for entity extraction:
+**Step 2: Activate the environment**
+- **Windows (PowerShell)**: `.\.venv\Scripts\activate`
+- **Mac/Linux**: `source .venv/bin/activate`
+
+**Step 3: Install AIMemoryOS**  
+Install the SDK directly from PyPI into your isolated environment:
+```bash
+uv pip install aimemoryos
+```
+*(If you are using standard `pip`, simply run `python -m pip install aimemoryos` instead).*
+
+**Step 4: Download the SpaCy language model weights**  
+The `aimemoryos` package will automatically install the `spacy` library for you. However, you must explicitly download the actual **English NLP model weights** (which pip cannot bundle) used for entity extraction:
 
 ```bash
+# If using uv:
+uv run python -m spacy download en_core_web_sm
+
+# If using standard python:
 python -m spacy download en_core_web_sm
 ```
 
@@ -58,7 +77,7 @@ async def run():
 
     # 2. Retrieve relevant context based on semantic similarity
     print("Retrieving context...")
-    results = memory.retrieve(
+    results = await memory.retrieve(
         query="What foods do I like?",
         top_k=5,
         score_threshold=0.2

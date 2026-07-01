@@ -40,29 +40,20 @@ class Memory:
             "duplicate_detected": result.duplicate_detected,
         }
 
-    def retrieve(
+    async def retrieve(
         self,
         *,
         query: str,
         top_k: int = 10,
         score_threshold: float = 0.0,
     ) -> list[dict[str, Any]]:
-        """Synchronously retrieve the most relevant chunks for a query."""
+        """Asynchronously retrieve the most relevant chunks for a query."""
         
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError("Event loop already running; call 'client.retrieve' awaitably instead")
-        except RuntimeError as e:
-            if "Event loop already running" in str(e):
-                raise
-            
-        result = asyncio.run(
-            self.client.retrieve(
-                query=query,
-                top_k=top_k,
-                min_score=score_threshold,
-                agent_id="default_agent"
-            )
+        result = await self.client.retrieve(
+            query=query,
+            top_k=top_k,
+            min_score=score_threshold,
+            agent_id="default_agent"
         )
 
         legacy: list[dict[str, Any]] = []
