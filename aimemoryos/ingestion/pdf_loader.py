@@ -6,6 +6,12 @@ from aimemoryos.core.exceptions import IngestionError
 
 logger = logging.getLogger(__name__)
 
+BOILERPLATE_PATTERNS = [
+    r"(?i)confidential information",
+    r"(?i)all rights reserved",
+    r"(?i)page \d+ of \d+",
+]
+
 class PDFLoader:
     def __init__(self):
         try:
@@ -24,8 +30,16 @@ class PDFLoader:
                 text_blocks = []
                 for page in doc:
                     text_blocks.append(page.get_text())
-                return "\n\n".join(text_blocks)
+                raw_text = "\n\n".join(text_blocks)
+                return _strip_boilerplate(raw_text)
             except Exception as e:
                 raise IngestionError(f"Failed to read PDF {filepath}: {e}")
                 
         return await asyncio.to_thread(_extract)
+    
+    def _strip_boilerplate(self, text: str) -> str:
+        for pattern in BOILERPLATE_PATTERNS:
+            text = re.sub(pattern, " ", text)
+        text = re.sub(r"\n{2,}", "\n\n", text)  # Replace multiple newlines with a single newline
+        return text.strip()
+

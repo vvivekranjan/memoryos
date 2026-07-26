@@ -13,3 +13,5 @@ orjson
 pytest
 pymupdf
 spacy
+unstructured
+unstructured[docx,pptx]

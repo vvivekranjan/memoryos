@@ -4,7 +4,10 @@ import duckdb
 import orjson
 import sys
 import asyncio
+import numpy as np
+import json
 
+from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -603,7 +606,7 @@ class DuckDBStore:
                             steps,
                             success_count,
                             failure_count,
-                            avg_execution_time_ms,
+                            avg_exec_time_ms,
                             abstracted_from,
                             domain
                         )
@@ -874,7 +877,11 @@ class DuckDBStore:
 
                         "contradicted_by": [
                             coerce_uuid(x)
-                            for x in json_loads(ext[8])
+                            for x in (
+                                ext[8]
+                                if isinstance(ext[8], (list, np.ndarray))
+                                else json_loads(ext[8])
+                            )
                         ],
 
                         "promoted_from": (
@@ -911,7 +918,7 @@ class DuckDBStore:
                     {
                         "trigger_condition": ext[1],
 
-                        "steps": json_loads(ext[2]),
+                        "steps": list(ext[2]) if isinstance(ext[2], (list, np.ndarray)) else json_loads(ext[2]),
 
                         "success_count": ext[3],
 
@@ -921,7 +928,10 @@ class DuckDBStore:
 
                         "abstracted_from": [
                             coerce_uuid(x)
-                            for x in json_loads(ext[6])
+                            for x in (
+                                ext[6] if isinstance(ext[6], (list, np.ndarray))
+                                else json_loads(ext[6])
+                            )
                         ],
 
                         "domain": ext[7],
@@ -1122,4 +1132,28 @@ class DuckDBStore:
             ).fetchone()
 
         return int(row[0]) if row else 0
+    
+    def update_field(
+        self,
+        *,
+        memory_id: UUID | str,
+        field_name: str,
+        value: Any,
+    ) -> None:
+        
+        if field_name == "contradicted_by":
+            val_str = json.dumps([str(x) for x in value])
+
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE memories
+                    SET contradicted_by = ?
+                    WHERE memory_id = ?
+                    """,
+                    [
+                        val_str,
+                        str(memory_id),
+                    ],
+                )
 

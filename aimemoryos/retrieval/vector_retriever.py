@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TYPE_CHECKING
 from uuid import UUID
 
 from aimemoryos.memory.models import LifecycleStateEnum, MemoryTypeEnum
 from aimemoryos.storage.faiss_store import FAISSStore, SearchResult
 from aimemoryos.storage.orchestrator import StorageOrchestrator
-from aimemoryos.vector.embedder import Embedder
+if TYPE_CHECKING:
+    from aimemoryos.vector.embedder import Embedder
 from aimemoryos.utils.logger import get_logger
 
 @dataclass(slots=True)

@@ -10,20 +10,20 @@ from datetime import (
 
 import pytest
 
-from memoryos.utils.hashing import (
+from aimemoryos.utils.hashing import (
     short_hash,
     verify_hash,
     sha256_text,
 )
-from memoryos.utils.logger import (
+from aimemoryos.utils.logger import (
     JsonFormatter,
     clear_request_id,
     log_exception,
     reset_request_id,
     set_request_id,
 )
-from memoryos.utils.metrics import MetricsRegistry
-from memoryos.utils.scoring import (
+from aimemoryos.utils.metrics import MetricsRegistry
+from aimemoryos.utils.scoring import (
     reciprocal_rank_fusion,
     recency_score,
     salience_score,

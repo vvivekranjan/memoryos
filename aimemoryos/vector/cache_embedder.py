@@ -118,7 +118,7 @@ class CacheEmbedder:
 
             return cached.embedding
 
-        embedding = await self.embedder.embed_text(text)
+        embedding = (await self.embedder.generate_embeddings([text]))[0]
 
         self._store(
             cache_key=cache_key,

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from aimemoryos.core.exceptions import EmptyQueryError, RetrievalValidationError
 from aimemoryos.graph.ontology import KuzuDBStore
+from aimemoryos.graph.traversal import bfs_traversal
 from aimemoryos.memory.models import (
     BaseMemory,
     LifecycleStateEnum,
@@ -296,7 +297,6 @@ class RetrievalEngine:
             for r in vector_results[:min(3, len(vector_results))]
         ]
 
-        from graph.traversal import bfs_traversal
         traversed = await bfs_traversal(
             store=self.graph_store,
             seeds=seeds,
@@ -376,7 +376,7 @@ class RetrievalEngine:
                     graph_path=graph_path,
                     importance_score=memory.importance_score,
                     activation_boost=score,
-                    trace_metadata={"graph_path": path_meta},
+                    # trace_metadata={"graph_path": path_meta},
                 ),
             ))
 
@@ -436,10 +436,10 @@ class RetrievalEngine:
                         existing.trace.provenance_confidence,
                         result.trace.provenance_confidence,
                     ),
-                    trace_metadata={
-                        **existing.trace.trace_metadata,
-                        **result.trace.trace_metadata,
-                    },
+                    # trace_metadata={
+                    #     **existing.trace.trace_metadata,
+                    #     **result.trace.trace_metadata,
+                    # },
                 ),
             )
 
