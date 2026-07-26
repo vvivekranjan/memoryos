@@ -540,6 +540,7 @@ class SQLiteEventLog:
                 BaseEvent
             ] = []
 
+            is_filtered = before is not None or event_type is not None
             prev_seq = -1
 
             for row in rows:
@@ -564,36 +565,26 @@ class SQLiteEventLog:
                         )
                     )
 
-                if (
-                    prev_seq == -1
-                    and row[
-                        "sequence_num"
-                    ] != 0
-                ):
-                    raise (
-                        SequenceGapError(
-                            f"First sequence "
-                            f"is "
-                            f"{row['sequence_num']}"
+                if not is_filtered:
+                    if (prev_seq == -1 and row["sequence_num"] != 0):
+                        raise (
+                            SequenceGapError(
+                                f"First sequence "
+                                f"is "
+                                f"{row['sequence_num']}"
+                            )
                         )
-                    )
 
-                if (
-                    prev_seq != -1
-                    and row[
-                        "sequence_num"
-                    ]
-                    != prev_seq + 1
-                ):
-                    raise (
-                        SequenceGapError(
-                            f"Gap detected "
-                            f"at "
-                            f"{row['sequence_num']}"
+                    if (prev_seq != -1 and row["sequence_num"] != prev_seq + 1):
+                        raise (
+                            SequenceGapError(
+                                f"Gap detected "
+                                f"at "
+                                f"{row['sequence_num']}"
+                            )
                         )
-                    )
 
-                prev_seq = row["sequence_num"]
+                    prev_seq = row["sequence_num"]
 
                 events.append(
                     BaseEvent(

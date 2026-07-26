@@ -119,7 +119,7 @@ async def bfs_traversal(
          via different paths, only the shortest-hop (highest-score) result
          is kept. The store may return duplicates for multi-seed queries.
 
-      4. Hop decay — TRD §5.4. Each result carries activation_boost =
+      4. Hop decay — Each result carries activation_boost =
          DECAY_PER_HOP ** hop and traversal_score = confidence × boost.
 
       5. Activation explosion cap — FM-T2. activation_boost is hard-capped
@@ -177,7 +177,9 @@ async def bfs_traversal(
     # Shorter hop → higher activation_boost → correct to prefer it.
     best_by_end: dict[str, TraversalResult] = {}
 
-    for row in raw_results:
+    raw_results_sorted = sorted(raw_results, key=lambda x: int(x.get("hop", 1)))
+
+    for row in raw_results_sorted:
         end_id: str = str(row.get("end_id", ""))
         start_id: str = str(row.get("start_id", ""))
         hop: int = int(row.get("hop", 1))

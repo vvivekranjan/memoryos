@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 import os
 import shutil
 
-from memoryos.storage.duckdb_store import DuckDBStore
-from memoryos.storage.orchestrator import StorageOrchestrator
-from memoryos.memory.episodic import EpisodicMemory
-from memoryos.memory.models import SpeakerRoleEnum, ModalityEnum, LifecycleStateEnum, ProvenanceEnum
+from aimemoryos.storage.duckdb_store import DuckDBStore
+from aimemoryos.storage.orchestrator import StorageOrchestrator
+from aimemoryos.memory.episodic import EpisodicMemory
+from aimemoryos.memory.models import SpeakerRoleEnum, ModalityEnum, LifecycleStateEnum, ProvenanceEnum
 
 @pytest.fixture
 def test_db_path(tmp_path):
@@ -68,9 +68,8 @@ def test_hallucination_firewall_routing(test_db_path):
     with duck._connect() as conn:
         row = conn.execute("SELECT memory_id FROM isolated_memories WHERE memory_id = ?", [str(mem_id)]).fetchone()
         assert row is not None
-        assert row[0] == str(mem_id)
+        assert row[0] == mem_id
         
         # Verify it is NOT in standard memories
         row_standard = conn.execute("SELECT memory_id FROM memories WHERE memory_id = ?", [str(mem_id)]).fetchone()
         assert row_standard is None
-

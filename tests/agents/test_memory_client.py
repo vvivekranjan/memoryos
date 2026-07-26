@@ -7,13 +7,13 @@ import numpy as np
 from pathlib import Path
 
 # Ensure repo root is on sys.path for local imports when running tests
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from memoryos.agents.memory_client import MemoryClient, IngestResult, RetrieveResult
-from memoryos.agents.context_builder import ContextBuilder
-from memoryos.agents.session_manager import SessionManager
+from aimemoryos.agents.memory_client import MemoryClient, IngestResult, RetrieveResult
+from aimemoryos.agents.context_builder import ContextBuilder
+from aimemoryos.agents.session_manager import SessionManager
 
 class DummyPipeline:
     def __init__(self, result=None):

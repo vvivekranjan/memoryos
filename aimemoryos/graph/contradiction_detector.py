@@ -5,15 +5,12 @@ import logging
 
 from datetime import datetime, timezone
 from itertools import combinations
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import Any, Sequence
 
 logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    # Imported at type-check time only to avoid circular imports at runtime.
-    # graph/ontology.py and storage/duckdb_store.py are both M2+ modules.
-    from graph.ontology import KuzuDBStore
-    from storage.duckdb_store import DuckDBStore
+from aimemoryos.graph.ontology import KuzuDBStore
+from aimemoryos.storage.duckdb_store import DuckDBStore
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -289,7 +286,7 @@ async def _update_contradicted_by(
     for the ContradictionEvent itself (already written to KuzuDB).
     """
     try:
-        existing = await duckdb_store.get_memory(loser_memory_id)
+        existing = duckdb_store.get_memory(loser_memory_id)
         if existing is None:
             logger.warning(
                 "graph.contradiction | memory not found in DuckDB — "
@@ -302,8 +299,10 @@ async def _update_contradicted_by(
         if event_id in current:
             return  # Idempotent — already recorded.
         current.append(event_id)
-        await duckdb_store.update_field(
-            loser_memory_id, "contradicted_by", current
+        duckdb_store.update_field(
+            memory_id=loser_memory_id,
+            field_name="contradicted_by",
+            value=current,
         )
     except Exception as exc:
         logger.warning(

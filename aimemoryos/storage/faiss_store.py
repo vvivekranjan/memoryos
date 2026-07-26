@@ -1,19 +1,18 @@
 from __future__ import annotations
 
+import json
+import numpy as np
+import faiss
+import asyncio
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
 from uuid import UUID
 from aimemoryos.core.exceptions import IndexNotInitialisedError, VectorDimensionError, VectorStoreError
 from aimemoryos.memory.models import LifecycleStateEnum, MemoryTypeEnum
-from aimemoryos.vector.embedder import DEFAULT_DIMENSION
-
-import json
-import numpy as np
-import faiss
-import asyncio
-
-VECTOR_DIMENSION = DEFAULT_DIMENSION
 from aimemoryos.core.config import config
+
+DEFAULT_DIMENSION = config.default_dimension
+VECTOR_DIMENSION = DEFAULT_DIMENSION
 FAISS_ROOT = Path(config.data_dir) / "faiss"
 INDEX_FILENAME = "index.faiss"
 METADATA_FILENAME = "metadata.json"
@@ -149,8 +148,6 @@ class FAISSStore:
 
         self.root_path.mkdir(parents=True, exist_ok=True)
 
-        faiss.write_index(self.index, str(self.index_path))
-
         try:
             faiss.write_index(self.index, str(self.index_path))
         except Exception as exc:
@@ -196,11 +193,15 @@ class FAISSStore:
         self,
         *,
         embeddings: list[list[float]],
+        memory_ids: list[UUID],
         metadatas: list[dict[str, Any]] | None = None,
     ) -> list[int]:
         """Batch inserts embeddings with optional metadata list."""
         if metadatas is not None and len(metadatas) != len(embeddings):
             raise VectorStoreError("metadatas length must match embeddings length")
+
+        if len(memory_ids) != len(embeddings):
+            raise VectorStoreError("memory_ids length must match embeddings length")
 
         if self.index is None:
             raise IndexNotInitialisedError("Call load() or initialise() before adding")
@@ -225,16 +226,14 @@ class FAISSStore:
 
         arr = (arr / norms.reshape(-1, 1)).astype(np.float32)
 
-        start_id = int(self.index.ntotal)
-        self.index.add(arr)
+        vector_ids: list[int] = np.array([uuid_to_int64(mid) for mid in memory_ids], dtype=np.int64)
+        self.index.add_with_ids(arr, vector_ids)
 
-        vector_ids: list[int] = []
-        for i in range(arr.shape[0]):
-            vid = start_id + i
-            vector_ids.append(int(vid))
-            self.metadata[int(vid)] = (metadatas[i] if metadatas is not None else {})
+        for i, vid in enumerate(vector_ids):
+            vid_int = int(vid)
+            self.metadata[vid_int] = metadatas[i] if metadatas is not None else {}
 
-        return vector_ids
+        return [int(vid) for vid in vector_ids]
     
     def remove_embedding(
         self,

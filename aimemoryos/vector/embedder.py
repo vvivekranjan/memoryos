@@ -6,6 +6,7 @@ from typing import List
 import numpy as np
 import asyncio
 
+from aimemoryos.core.interfaces import Embedder as BaseEmbedder
 from aimemoryos.core.config import MemoryConfig
 from aimemoryos.utils.logger import get_logger
 
@@ -26,7 +27,7 @@ class EmbeddingDimensionError(
 ):
     """Raised when embedding invalid."""
 
-class Embedder:
+class Embedder(BaseEmbedder):
     """
     Embedding infrastructure.
 
@@ -95,6 +96,24 @@ class Embedder:
             )
 
         return arr.astype(np.float32)
+    
+    async def embed_text(self, text: str) -> np.ndarray:
+        """
+        Single text embedding (async).
+        """
+        return (await self.generate_embeddings([text]))[0]
+    
+    async def embed_batch(self, texts: list[str]) -> np.ndarray:
+        """
+        Wrapper for generate_embeddings to maintain compatibility.
+        """
+        return await self.generate_embeddings(texts)
+    
+    def dimension(self) -> int:
+        """
+        Return the embedding dimension.
+        """
+        return self.embedding_dimension
     
     # _prepare_embedding removed — generate_embeddings returns numpy arrays directly
 
