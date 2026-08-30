@@ -31,7 +31,7 @@ from aimemoryos.memory.models import (
 from aimemoryos.storage.duckdb_store import DuckDBStore, MemoryNotFoundError
 from aimemoryos.storage.faiss_store import FAISSStore
 from aimemoryos.storage.sqlite_log import SQLiteEventLog
-from aimemoryos.graph.ontology import KuzuDBStore
+from aimemoryos.graph.ontology import FalkorDBStore
 from aimemoryos.storage.hallucination_firewall import HallucinationFirewall
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class StorageOrchestrator:
         duckdb_store: DuckDBStore,
         faiss_store: FAISSStore,
         sqlite_log: SQLiteEventLog,
-        graph_store: Optional[KuzuDBStore] = None,
+        graph_store: Optional[FalkorDBStore] = None,
     ) -> None:
         self.duckdb = duckdb_store
         self.faiss = faiss_store
@@ -411,7 +411,7 @@ class StorageOrchestrator:
 
             # Step 2: DuckDB state update.
             self.duckdb.apply_lifecycle_transition(memory_id, new_state)
-            
+
         except Exception as exc:
             logger.error("Partial failure during lifecycle transition for memory %s: %s", memory_id, exc)
             raise RuntimeError(f"Partial failure during lifecycle transition: {exc}") from exc
@@ -424,8 +424,8 @@ class StorageOrchestrator:
             memory = self.duckdb.get_memory(memory_id)
         except MemoryNotFoundError:
             return TransactionResult(
-                success=False, 
-                rollback_performed=False, 
+                success=False,
+                rollback_performed=False,
                 error=f"Memory {memory_id} not found"
             )
 
@@ -502,4 +502,3 @@ class StorageOrchestrator:
             "graph_store": "healthy" if self.graph is not None else "not_configured",
             "orchestrator": "healthy",
         }
-

@@ -7,7 +7,7 @@ from pathlib import Path
 from aimemoryos.core.config import config
 
 logger = logging.getLogger(__name__)
-from aimemoryos.graph.ontology import KuzuDBStore
+from aimemoryos.graph.ontology import FalkorDBStore
 from aimemoryos.ingestion.chunker import Chunker
 from aimemoryos.ingestion.deduplicator import Deduplicator
 from aimemoryos.ingestion.pipeline import Pipeline
@@ -27,7 +27,6 @@ class RuntimePaths:
     duckdb_path: Path
     faiss_dir: Path
     events_path: Path
-    graph_dir: Path
 
     @classmethod
     def from_env(cls) -> "RuntimePaths":
@@ -37,12 +36,10 @@ class RuntimePaths:
             duckdb_path=data_dir / "memory.duckdb",
             faiss_dir=data_dir / "faiss",
             events_path=data_dir / "events.sqlite",
-            graph_dir=data_dir / "graph" / "memory_graph.kuzu",
         )
         paths.data_dir.mkdir(parents=True, exist_ok=True)
         paths.faiss_dir.mkdir(parents=True, exist_ok=True)
         paths.events_path.parent.mkdir(parents=True, exist_ok=True)
-        paths.graph_dir.parent.mkdir(parents=True, exist_ok=True)
         return paths
 
 
@@ -54,7 +51,7 @@ class MemoryRuntime:
     duckdb_store: DuckDBStore
     faiss_store: FAISSStore
     event_log: SQLiteEventLog
-    graph_store: KuzuDBStore
+    graph_store: FalkorDBStore
     orchestrator: StorageOrchestrator
     deduplicator: Deduplicator
     retriever: VectorRetriever
@@ -93,7 +90,11 @@ def build_runtime(
         logger.error(f"Failed to load faiss_store: {e}")
 
     event_log = SQLiteEventLog(db_path=runtime_paths.events_path)
-    graph_store = KuzuDBStore(db_path=str(runtime_paths.graph_dir))
+    graph_store = FalkorDBStore(
+        host=config.falkordb_host,
+        port=config.falkordb_port,
+        graph_name="memoryos"
+    )
     try:
         graph_store.initialise()
     except Exception as e:

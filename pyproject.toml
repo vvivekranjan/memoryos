@@ -1,14 +1,13 @@
 [project]
 name = "aimemoryos"
-version = "0.1.2"
+version = "0.2.0"
 description = "A long-term semantic and episodic memory OS for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "duckdb>=0.9.0",
     "faiss-cpu>=1.8.0",
-    "google-cloud-aiplatform>=3.0.0",
-    "kuzu>=0.0.1",
+    "falkordb>=1.0.0",
     "loguru>=0.7.2",
     "numpy>=1.24.0,<3.0.0",
     "openrouter>=0.0.1",
@@ -16,6 +15,7 @@ dependencies = [
     "pydantic>=2.5.0",
     "pydantic-settings>=2.0.0",
     "pymupdf>=1.23.0",
+    "redis>=5.0.0",
     "sentence-transformers>=2.2.0",
     "spacy>=3.7.0",
     "structlog>=23.0.0",
@@ -34,3 +34,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["aimemoryos*"]
+
+[tool.uv]
+link-mode = "copy"

@@ -9,7 +9,7 @@ from typing import Any, Sequence
 
 logger = logging.getLogger(__name__)
 
-from aimemoryos.graph.ontology import KuzuDBStore
+from aimemoryos.graph.ontology import FalkorDBStore
 from aimemoryos.storage.duckdb_store import DuckDBStore
 
 # ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@ class ContradictionResult:
 
     Attributes
     ----------
-    event_id      : UUID string — KuzuDB ContradictionEvent primary key
+    event_id      : UUID string — FalkorDB ContradictionEvent primary key
     memory_id_a   : first SemanticMemory (higher confidence = "winner")
     memory_id_b   : second SemanticMemory (lower confidence = flagged)
     entity        : normalised subject entity string
@@ -223,15 +223,23 @@ def _find_contradictions(
 
 
 async def _write_contradiction_event(
-    kuzu_store: "KuzuDBStore",
+    graph_store: FalkorDBStore,
     event: ContradictionResult,
 ) -> None:
     """
-    Write a ContradictionEvent node to KuzuDB.
+    Write a ContradictionEvent node to FalkorDB.
 
     Uses MERGE on event_id so reflection cycles that re-run over the same
     memory cluster don't create duplicate nodes.
     """
+    if not graph_store or not getattr(graph_store, "_initialised", False):
+        logger.warning(
+            "graph.contradiction | FalkorDB unavailable — "
+            "ContradictionEvent not persisted | event_id=%s",
+            event.event_id,
+        )
+        return
+
     cypher = """
         MERGE (e:ContradictionEvent {event_id: $event_id})
         SET e.memory_id_a = $memory_id_a,
@@ -240,18 +248,10 @@ async def _write_contradiction_event(
             e.resolved    = $resolved,
             e.created_at  = $created_at
     """
-    conn = getattr(kuzu_store, "_conn", None)
-    if conn is None:
-        logger.warning(
-            "graph.contradiction | KuzuDB unavailable — "
-            "ContradictionEvent not persisted | event_id={}",
-            event.event_id,
-        )
-        return
     try:
-        conn.execute(
+        await graph_store.graph.query(
             cypher,
-            parameters={
+            {
                 "event_id": event.event_id,
                 "memory_id_a": event.memory_id_a,
                 "memory_id_b": event.memory_id_b,
@@ -262,13 +262,13 @@ async def _write_contradiction_event(
         )
         logger.info(
             "graph.contradiction | ContradictionEvent written | "
-            "event_id={} memory_a={} memory_b={} score={:.4f}",
+            "event_id=%s memory_a=%s memory_b=%s score=%.4f",
             event.event_id, event.memory_id_a, event.memory_id_b, event.score,
         )
     except Exception as exc:
         logger.warning(
-            "graph.contradiction | KuzuDB write failed | "
-            "event_id={} | error={}", event.event_id, exc,
+            "graph.contradiction | FalkorDB write failed | "
+            "event_id=%s | error=%s", event.event_id, exc,
         )
 
 
@@ -320,7 +320,7 @@ async def _update_contradicted_by(
 async def detect_and_flag(
     new_memory: Any,
     existing_memories: Sequence[Any],
-    kuzu_store: "KuzuDBStore",
+    kuzu_store: "FalkorDBStore",
     duckdb_store: "DuckDBStore",
 ) -> list[ContradictionResult]:
     """
@@ -364,7 +364,7 @@ async def detect_and_flag(
 
 async def detect_for_cluster(
     cluster_memories: Sequence[Any],
-    kuzu_store: "KuzuDBStore",
+    kuzu_store: "FalkorDBStore",
     duckdb_store: "DuckDBStore",
 ) -> list[ContradictionResult]:
     """
@@ -420,7 +420,7 @@ async def detect_for_cluster(
 async def flag_correction(
     superseded_memory: Any,
     corrected_memory: Any,
-    kuzu_store: "KuzuDBStore",
+    kuzu_store: "FalkorDBStore",
     duckdb_store: "DuckDBStore",
 ) -> ContradictionResult | None:
     """
@@ -482,37 +482,25 @@ async def flag_correction(
     )
     return event
 
-
 async def mark_resolved(
     event_id: str,
-    kuzu_store: "KuzuDBStore",
+    graph_store: FalkorDBStore,
 ) -> None:
-    """
-    Set resolved=True on a ContradictionEvent node in KuzuDB.
-
-    Called by consolidator.py or feedback_collector.py after archival of the
-    weaker memory confirms the contradiction has been handled.
-    """
-    conn = getattr(kuzu_store, "_conn", None)
-    if conn is None:
+    """Set resolved=True on a ContradictionEvent node in FalkorDB."""
+    if not graph_store or not getattr(graph_store, "_initialised", False):
         logger.warning(
-            "graph.contradiction | KuzuDB unavailable — "
-            "mark_resolved skipped | event_id={}", event_id,
+            "graph.contradiction | FalkorDB unavailable — mark_resolved skipped | event_id=%s",
+            event_id,
         )
         return
+
     cypher = """
         MATCH (e:ContradictionEvent {event_id: $event_id})
         SET e.resolved = true
     """
     try:
-        conn.execute(cypher, parameters={"event_id": event_id})
-        logger.info(
-            "graph.contradiction | ContradictionEvent resolved | event_id={}",
-            event_id,
-        )
+        await graph_store.graph.query(cypher, {"event_id": event_id})
+        logger.info("graph.contradiction | ContradictionEvent resolved | event_id=%s", event_id)
     except Exception as exc:
-        logger.warning(
-            "graph.contradiction | mark_resolved failed | "
-            "event_id={} | error={}", event_id, exc,
-        )
+        logger.warning("graph.contradiction | mark_resolved failed | event_id=%s | error=%s", event_id, exc)
 

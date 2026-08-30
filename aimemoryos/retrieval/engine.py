@@ -7,7 +7,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from aimemoryos.core.exceptions import EmptyQueryError, RetrievalValidationError
-from aimemoryos.graph.ontology import KuzuDBStore
+from aimemoryos.graph.ontology import FalkorDBStore
 from aimemoryos.graph.traversal import bfs_traversal
 from aimemoryos.memory.models import (
     BaseMemory,
@@ -116,7 +116,7 @@ class RetrievalEngine:
         vector_retriever: VectorRetriever,
         memory_store: MemoryStore,
         context_assembler: ContextAssembler,
-        graph_store: KuzuDBStore | None = None,
+        graph_store: FalkorDBStore | None = None,
     ):
         self.vector_retriever = vector_retriever
         self.memory_store = memory_store

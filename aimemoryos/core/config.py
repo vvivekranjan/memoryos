@@ -17,6 +17,8 @@ class MemoryConfig:
     semantic_decay_rate: float = 0.01
     vector_weight: float = 0.7
     graph_weight: float = 0.3
+    falkordb_host: str = "127.0.0.1"
+    falkordb_port: int = 6379
 
     def __init__(self, **kwargs):
         env = os.environ.get
@@ -45,6 +47,8 @@ class MemoryConfig:
             "semantic_decay_rate": cls.semantic_decay_rate,
             "vector_weight": cls.vector_weight,
             "graph_weight": cls.graph_weight,
+            "falkordb_host": cls.falkordb_host,
+            "falkordb_port": cls.falkordb_port,
         }
 
 config = MemoryConfig()

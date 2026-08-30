@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
-from aimemoryos.retrieval.engine import MemoryResult, RetrievalTrace
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from aimemoryos.retrieval.engine import MemoryResult, RetrievalTrace
 
 @dataclass(slots=True)
 class ContextBlock:
