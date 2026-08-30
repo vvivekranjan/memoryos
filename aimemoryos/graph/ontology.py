@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-import kuzu
+try:
+    import kuzu
+except ImportError:
+    kuzu = None
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, override
@@ -91,6 +95,7 @@ class KuzuDBStore:
         # Used only when self._conn is None. See module docstring.
         self._nodes: dict[str, dict[str, Any]] = {}
         self._edges: dict[str, list[dict[str, Any]]] = {}
+        self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -244,7 +249,8 @@ class KuzuDBStore:
         query_params = {k: v for k, v in props.items() if k != "metadata_json"}
 
         try:
-            self._conn.execute(cypher, parameters=query_params)
+            async with self._lock:
+                self._conn.execute(cypher, parameters=query_params)
         except Exception as exc:
             logger.warning(
                 "graph.ontology | KuzuDB node upsert failed — "
@@ -263,7 +269,8 @@ class KuzuDBStore:
 
         cypher = "MATCH (n:Entity {node_id: $node_id}) DETACH DELETE n"
         try:
-            self._conn.execute(cypher, parameters={"node_id": memory_id})
+            async with self._lock:
+                self._conn.execute(cypher, parameters={"node_id": memory_id})
         except Exception as exc:
             logger.warning(
                 "graph.ontology | KuzuDB node deletion failed | memory_id=%s | error=%s",
@@ -286,6 +293,9 @@ class KuzuDBStore:
         rel_table must be one of: RELATES | CAUSES | COOCCURS.
         Falls back to _edges mirror when KuzuDB is unavailable.
         """
+        if rel_table not in {"RELATES", "CAUSES", "COOCCURS"}:
+            raise ValueError(f"Invalid rel_table: {rel_table}")
+
         edge = {
             "from_id": from_id,
             "to_id": to_id,
@@ -310,7 +320,8 @@ class KuzuDBStore:
             }}]->(b)
         """
         try:
-            self._conn.execute(cypher, parameters=edge)
+            async with self._lock:
+                self._conn.execute(cypher, parameters=edge)
         except Exception as exc:
             logger.warning(
                 "graph.ontology | KuzuDB edge insert failed | "
@@ -336,9 +347,10 @@ class KuzuDBStore:
                           r.last_seen = $now
         """
         try:
-            self._conn.execute(
-                cypher, parameters={"from_id": from_id, "to_id": to_id, "now": now}
-            )
+            async with self._lock:
+                self._conn.execute(
+                    cypher, parameters={"from_id": from_id, "to_id": to_id, "now": now}
+                )
         except Exception as exc:
             logger.warning(
                 "graph.ontology | COOCCURS increment failed | "
@@ -368,7 +380,8 @@ class KuzuDBStore:
                        n.created_at  AS created_at
             """
             try:
-                result = self._conn.execute(cypher, parameters={"node_id": node_id})
+                async with self._lock:
+                    result = self._conn.execute(cypher, parameters={"node_id": node_id})
                 rows = result.get_as_df() if hasattr(result, "get_as_df") else []
                 if len(rows):
                     return dict(rows.iloc[0])
@@ -417,6 +430,8 @@ class KuzuDBStore:
         limit: int,
     ) -> list[dict[str, Any]]:
         """BFS via KuzuDB Cypher"""
+        max_hops = int(max_hops)
+        limit = int(limit)
         cypher = f"""
             MATCH (start:Entity)-[r:RELATES*1..{max_hops}]->(target:Entity)
             WHERE start.node_id IN $seeds
@@ -426,7 +441,8 @@ class KuzuDBStore:
             LIMIT {limit}
         """
         try:
-            result = self._conn.execute(cypher, parameters={"seeds": seeds})
+            async with self._lock:
+                result = self._conn.execute(cypher, parameters={"seeds": seeds})
             cols = result.get_column_names()
             records = []
             while result.has_next():

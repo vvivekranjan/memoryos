@@ -61,6 +61,19 @@ class JsonFormatter(logging.Formatter):
 
             payload["subsystem"] = subsystem
 
+        ALLOWED_EXTRA_KEYS = {
+            "subsystem",
+            "exception_type",
+            "memory_id",
+            "agent_id",
+            "event_id",
+            "latency_ms",
+            "count",
+            "error",
+            "model_name",
+            "embedding_dimension",
+        }
+
         for key, value in (
             record.__dict__.items()
         ):
@@ -68,29 +81,7 @@ class JsonFormatter(logging.Formatter):
             if key.startswith("_"):
                 continue
 
-            if key in {
-                "name",
-                "msg",
-                "args",
-                "levelname",
-                "levelno",
-                "pathname",
-                "filename",
-                "module",
-                "exc_info",
-                "exc_text",
-                "stack_info",
-                "lineno",
-                "funcName",
-                "created",
-                "msecs",
-                "relativeCreated",
-                "thread",
-                "threadName",
-                "processName",
-                "process",
-                "message",
-            }:
+            if key not in ALLOWED_EXTRA_KEYS:
                 continue
 
             if key not in payload:

@@ -15,7 +15,8 @@ def test_db_path(tmp_path):
     path = tmp_path / "test_fw.duckdb"
     yield path
 
-def test_hallucination_firewall_routing(test_db_path):
+@pytest.mark.asyncio
+async def test_hallucination_firewall_routing(test_db_path):
     duck = DuckDBStore(test_db_path)
     duck.initialise()
     
@@ -60,7 +61,7 @@ def test_hallucination_firewall_routing(test_db_path):
     )
     
     # Run ingestion
-    res = asyncio.run(orch.ingest_memory(mem, [0.1, 0.2, 0.3]))
+    res = await orch.ingest_memory(mem, [0.1, 0.2, 0.3])
     assert res.success is True
     assert res.error == "Routed to isolated store"
     
@@ -68,7 +69,7 @@ def test_hallucination_firewall_routing(test_db_path):
     with duck._connect() as conn:
         row = conn.execute("SELECT memory_id FROM isolated_memories WHERE memory_id = ?", [str(mem_id)]).fetchone()
         assert row is not None
-        assert row[0] == mem_id
+        assert row[0] == str(mem_id)
         
         # Verify it is NOT in standard memories
         row_standard = conn.execute("SELECT memory_id FROM memories WHERE memory_id = ?", [str(mem_id)]).fetchone()

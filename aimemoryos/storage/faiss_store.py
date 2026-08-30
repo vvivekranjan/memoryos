@@ -77,7 +77,7 @@ def uuid_to_int64(value: UUID) -> int:
     """
     FAISS requires int64 IDs.
     """
-    return value.int % (2**63 - 1)
+    return value.int % (1 << 63)
 
 
 def _coerce_memory_type(value: MemoryTypeEnum | str) -> MemoryTypeEnum:
@@ -177,6 +177,13 @@ class FAISSStore:
             raise IndexNotInitialisedError("Call load() or initialise() before adding")
 
         vector_id = uuid_to_int64(memory_id)
+
+        if vector_id in self.metadata:
+            return vector_id
+
+        if memory_type is not None:
+            memory_type = _coerce_memory_type(memory_type)
+
         self.index.add_with_ids(
             normalise_embedding(embedding),
             np.array([vector_id], dtype=np.int64),
@@ -184,7 +191,7 @@ class FAISSStore:
         self.metadata[vector_id] = {
             "memory_id": str(memory_id),
             "agent_id": agent_id,
-            "memory_type": memory_type.value,
+            "memory_type": memory_type.value if memory_type else None,
             "lifecycle_state": lifecycle_state.value,
         }
         return int(vector_id)
@@ -304,6 +311,7 @@ class FAISSStore:
         *,
         query_embedding: list[float],
         top_k: int = 10,
+        lifecycle_states: list[LifecycleStateEnum] | None = None
     ) -> list[SearchResult]:
         """Async wrapper around search for retrieval callers."""
 
@@ -311,6 +319,7 @@ class FAISSStore:
             self.search,
             query_embedding=query_embedding,
             top_k=top_k,
+            lifecycle_states=lifecycle_states,
         )
 
     async def add_embedding_async(

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from dataclasses import asdict, dataclass
+
+logger = logging.getLogger(__name__)
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -120,6 +123,10 @@ class Pipeline:
         # Generate embeddings asynchronously (may offload to thread inside Embedder)
         embeddings = await self.embedder.generate_embeddings(chunk_texts)
 
+        if len(embeddings) != len(chunking_result.chunks):
+            logger.error(f"Embeddings count ({len(embeddings)}) != chunks count ({len(chunking_result.chunks)})")
+            raise ValueError("Mismatch between embeddings and chunks length.")
+
         # Persist Memories
         vector_ids = []
         for chunk, embedding in zip(chunking_result.chunks, embeddings):
@@ -127,16 +134,19 @@ class Pipeline:
             memory = self._build_memory(
                 request=request,
                 chunk=chunk,
-                # we don't pass content_hash because memory creation handles hashing,
-                # but we can pass it as a param if we want, but build_memory expects it.
             )
 
-            txn = await self.orchestrator.ingest_memory(
-                memory=memory,
-                embedding=embedding.tolist(),
-            )
-            if txn.success:
-                vector_ids.append(str(memory.memory_id))
+            try:
+                txn = await self.orchestrator.ingest_memory(
+                    memory=memory,
+                    embedding=embedding.tolist(),
+                )
+                if txn.success:
+                    vector_ids.append(str(memory.memory_id))
+                else:
+                    logger.warning(f"Skipped/failed ingest_memory for memory {memory.memory_id}: {getattr(txn, 'error', 'Unknown error')}")
+            except Exception as e:
+                logger.exception(f"Exception during ingest_memory for memory {memory.memory_id}: {e}")
 
         return {
             "document_id": request.document_id,

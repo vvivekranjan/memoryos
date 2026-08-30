@@ -110,9 +110,12 @@ def fuse_memory_results(
 
         memory = base_res.memory
         importance = getattr(memory, "importance_score", 0.5)
-        prov_conf = getattr(memory, "provenance_confidence", 1.0)
+        if base_res.trace:
+            prov_conf = getattr(base_res.trace, "provenance_confidence", 1.0)
+        else:
+            prov_conf = getattr(memory, "provenance_confidence", 1.0)
         prov = getattr(memory, "provenance", "OBSERVED")
-        provenance_str = prov.value if hasattr(prov, "value") else str(prov)
+        provenance_str = getattr(prov, "value", str(prov))
 
         act_boost = activation_boosts_by_memory.get(mid, 0.0)
 

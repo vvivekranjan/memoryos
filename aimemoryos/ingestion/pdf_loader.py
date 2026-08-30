@@ -1,6 +1,11 @@
 import asyncio
 import logging
-import pymupdf
+import re
+
+try:
+    import pymupdf
+except ImportError:
+    pymupdf = None
 
 from aimemoryos.core.exceptions import IngestionError
 
@@ -14,11 +19,9 @@ BOILERPLATE_PATTERNS = [
 
 class PDFLoader:
     def __init__(self):
-        try:
-            self.pymupdf = pymupdf
-        except ImportError:
+        self.pymupdf = pymupdf
+        if self.pymupdf is None:
             logger.warning("PyMuPDF is not installed. PDF ingestion will fail.")
-            self.pymupdf = None
             
     async def extract_text(self, filepath: str) -> str:
         if self.pymupdf is None:
@@ -26,12 +29,12 @@ class PDFLoader:
             
         def _extract():
             try:
-                doc = self.pymupdf.open(filepath)
-                text_blocks = []
-                for page in doc:
-                    text_blocks.append(page.get_text())
-                raw_text = "\n\n".join(text_blocks)
-                return _strip_boilerplate(raw_text)
+                with self.pymupdf.open(filepath) as doc:
+                    text_blocks = []
+                    for page in doc:
+                        text_blocks.append(page.get_text())
+                    raw_text = "\n\n".join(text_blocks)
+                    return self._strip_boilerplate(raw_text)
             except Exception as e:
                 raise IngestionError(f"Failed to read PDF {filepath}: {e}")
                 

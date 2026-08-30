@@ -395,21 +395,26 @@ class StorageOrchestrator:
                 f"Transition to {new_state!r} rejected for memory_id={memory_id}"
             )
 
-        # Step 1: SQLite MUST succeed before DuckDB update.
-        if self.event_log is not None:
-            self.event_log.log_lifecycle_transition(
-                agent_id=memory.agent_id,
-                payload=LifecycleTransitionPayload(
-                    memory_id=memory.memory_id,
-                    old_state=old_state,
-                    new_state=new_state,
-                    trigger=TriggerEnum.MANUAL,
-                    importance_at_transition=memory.importance_score,
-                ),
-            )
+        # Step 1 & 2 in a try/except block to handle partial failures
+        try:
+            if self.event_log is not None:
+                self.event_log.log_lifecycle_transition(
+                    agent_id=memory.agent_id,
+                    payload=LifecycleTransitionPayload(
+                        memory_id=memory.memory_id,
+                        old_state=old_state,
+                        new_state=new_state,
+                        trigger=TriggerEnum.MANUAL,
+                        importance_at_transition=memory.importance_score,
+                    ),
+                )
 
-        # Step 2: DuckDB state update.
-        self.duckdb.apply_lifecycle_transition(memory_id, new_state)
+            # Step 2: DuckDB state update.
+            self.duckdb.apply_lifecycle_transition(memory_id, new_state)
+            
+        except Exception as exc:
+            logger.error("Partial failure during lifecycle transition for memory %s: %s", memory_id, exc)
+            raise RuntimeError(f"Partial failure during lifecycle transition: {exc}") from exc
 
     async def forget_memory(self, memory_id: UUID) -> TransactionResult:
         """
@@ -477,18 +482,7 @@ class StorageOrchestrator:
         boundaries. This method exists as an orchestration
         placeholder with the correct exception contract.
         """
-        try:
-            # IMPORTANT:
-            # Full replay engine intentionally deferred
-            # to replay/reconstructor.py
-            #
-            # This method currently exists as orchestration
-            # placeholder to preserve architecture boundaries.
-
-            return TransactionResult(success=True)
-
-        except (MemoryNotFoundError, Exception) as exc:
-            raise ReplayRebuildError(str(exc)) from exc
+        return TransactionResult(success=False, error="Not implemented")
 
     # ------------------------------------------------------------------
     # Health probe

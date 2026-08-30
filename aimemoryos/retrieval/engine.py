@@ -336,7 +336,13 @@ class RetrievalEngine:
                     "hop": hop,
                 })
 
-        graph_memory_ids = [UUID(mid) for mid in graph_scores]
+        graph_memory_ids = []
+        for mid in graph_scores:
+            try:
+                graph_memory_ids.append(UUID(mid))
+            except ValueError:
+                continue
+
         if not graph_memory_ids:
             return []
 
@@ -372,6 +378,7 @@ class RetrievalEngine:
             results.append(MemoryResult(
                 memory=memory,
                 trace=RetrievalTrace(
+                    memory_id=mid,
                     final_score=score,
                     retrieved_by=["graph"],
                     graph_rank=rank,

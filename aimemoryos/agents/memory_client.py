@@ -372,7 +372,7 @@ class MemoryClient:
         if self.event_log is None:
             raise RuntimeError("Cannot snapshot: event_log is not initialised in runtime.")
         
-        return self.event_log.snapshot(
+        return await self.event_log.snapshot(
             output_path=output_path,
             since=since,
             verify=verify,

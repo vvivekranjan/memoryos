@@ -106,7 +106,7 @@ class GraphRetriever:
         if not seeds:
             logger.debug(
                 "graph_retriever | no BFS seeds resolved — returning empty | "
-                "agent_id={} query_text={!r}",
+                "agent_id=%s query_text=%r",
                 agent_id, query_text[:80],
             )
             return []
@@ -155,7 +155,7 @@ class GraphRetriever:
         except Exception as exc:
             logger.warning(
                 "graph_retriever | DuckDB bulk fetch failed | "
-                "agent_id={} count={} | error={}",
+                "agent_id=%s count=%s | error=%s",
                 agent_id, len(ranked_ids), exc,
             )
             return []
@@ -176,9 +176,14 @@ class GraphRetriever:
                 # Can occur if the graph references a memory from another agent
                 # (graph is not partitioned by agent_id at the edge level).
                 logger.debug(
-                    "graph_retriever | memory_id={} not found for "
-                    "agent_id={} — skipping", memory_id, agent_id,
+                    "graph_retriever | memory_id=%s not found for "
+                    "agent_id=%s — skipping", memory_id, agent_id,
                 )
+                continue
+
+            try:
+                candidate_uuid = UUID(str(memory_id))
+            except ValueError:
                 continue
 
             edge = best[memory_id]
@@ -212,7 +217,7 @@ class GraphRetriever:
 
             # Full RetrievalTrace on every candidate.
             trace = RetrievalTrace(
-                memory_id=memory_id,
+                memory_id=candidate_uuid,
                 final_score=traversal_score,
                 retrieved_by=["graph"],
                 graph_rank=rank,
@@ -236,7 +241,7 @@ class GraphRetriever:
 
             candidates.append(
                 RetrievalCandidate(
-                    memory_id=memory_id,
+                    memory_id=candidate_uuid,
                     content=memory.content,
                     memory_type=memory_type,
                     final_score=traversal_score,

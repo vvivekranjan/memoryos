@@ -57,6 +57,15 @@ class HallucinationFirewall:
         Raises HallucinationFirewallError if the agent doesn't have clearance
         to access isolated memories.
         """
+        agent_clearance = agent_clearance or []
+        valid_provenance = {p.value for p in ProvenanceEnum}
+        
+        for clearance in agent_clearance:
+            if clearance not in valid_provenance:
+                raise HallucinationFirewallError(
+                    f"Invalid agent clearance value: {clearance}"
+                )
+
         provenance = getattr(memory, "provenance", None)
         if provenance is None:
             return
@@ -66,7 +75,6 @@ class HallucinationFirewall:
         )
 
         if prov_value in _FIREWALL_ISOLATED:
-            agent_clearance = agent_clearance or []
             if prov_value not in agent_clearance:
                 logger.warning(
                     "HallucinationFirewall: Blocked unauthorized retrieval of memory %s (provenance=%s)",

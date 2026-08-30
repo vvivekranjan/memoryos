@@ -8,7 +8,7 @@ from datetime import (
 )
 from enum import Enum
 from pathlib import Path
-import pickle
+import json
 import os
 from uuid import UUID
 from typing import Any
@@ -359,16 +359,16 @@ class IndexManager:
             "key": partition.key.key,
         }
 
-        with open(meta_path, "wb") as fh:
-            pickle.dump(serial_meta, fh)
+        with open(meta_path, "w") as fh:
+            json.dump(serial_meta, fh)
 
     def _load_partitions(self) -> None:
         """Load persisted partitions from disk if present."""
 
         for meta_file in self.base_path.glob("*.meta"):
             try:
-                with open(meta_file, "rb") as fh:
-                    serial_meta = pickle.load(fh)
+                with open(meta_file, "r") as fh:
+                    serial_meta = json.load(fh)
 
                 key_str = serial_meta.get("key")
                 if not key_str:

@@ -15,11 +15,20 @@ class MemoryConfig:
     default_agent_id: str = "default"
     episodic_decay_rate: float = 0.1
     semantic_decay_rate: float = 0.01
+    vector_weight: float = 0.7
+    graph_weight: float = 0.3
 
     def __init__(self, **kwargs):
         env = os.environ.get
         for key, default in self._defaults().items():
-            setattr(self, key, env(f"AIMEMORYOS_{key.upper()}", kwargs.get(key, default)))
+            val = env(f"AIMEMORYOS_{key.upper()}", kwargs.get(key, default))
+            if isinstance(default, int):
+                val = int(val)
+            elif isinstance(default, float):
+                val = float(val)
+            elif isinstance(default, bool):
+                val = str(val).lower() in ("true", "1", "yes")
+            setattr(self, key, val)
 
     @classmethod
     def _defaults(cls):

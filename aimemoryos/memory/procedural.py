@@ -52,6 +52,8 @@ class ProceduralMemory(BaseMemory):
     @field_validator("avg_execution_time_ms")
     @classmethod
     def validate_avg_execution_time_ms(cls, value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
 
         if value < 0:
             raise ValueError("Average execution time should be non negative number")

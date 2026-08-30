@@ -304,7 +304,7 @@ class IngestionPayload(BaseModel):
     def validate_memory_type(cls, value: str) -> str:
         value = value.strip().upper()
         if value not in MemoryTypeEnum._value2member_map_:
-            raise ValueError(f"memory_type must be one of {list({e.value for e in MemoryTypeEnum}.keys())}")
+            raise ValueError(f"memory_type must be one of {[e.value for e in MemoryTypeEnum]}")
         return value
 
     @field_validator("sha256")

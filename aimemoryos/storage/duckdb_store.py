@@ -355,6 +355,9 @@ class DuckDBStore:
         memory: BaseMemory,
     ) -> None:
 
+        if table_name not in {"memories", "isolated_memories"}:
+            raise ValueError(f"Invalid table_name: {table_name}")
+
         with self._connect() as conn:
 
             conn.begin()
@@ -663,284 +666,290 @@ class DuckDBStore:
 
 
 
+    def _get_memory_with_conn(
+        self,
+        conn,
+        memory_id: UUID,
+    ) -> BaseMemory:
+        row = conn.execute(
+            """
+            SELECT
+                memory_id,
+                schema_version,
+                memory_type,
+                agent_id,
+                content,
+                sha256,
+                modality,
+                lifecycle_state,
+                created_at,
+                last_accessed_at,
+                access_count,
+                decay_anchor,
+                decay_multiplier,
+                importance_score,
+                salience_score,
+                vad_v,
+                vad_a,
+                vad_d,
+                emotional_class,
+                provenance,
+                provenance_confidence,
+                graph_node_id,
+                forward_ref,
+                tags,
+                metadata
+            FROM memories
+            WHERE memory_id = ?
+            """,
+            [str(memory_id)],
+        ).fetchone()
+
+        if row is None:
+            raise MemoryNotFoundError(
+                f"Memory not found: {memory_id}"
+            )
+
+        base_data = {
+            "memory_id": coerce_uuid(row[0]),
+            "schema_version": row[1],
+            "memory_type": MemoryTypeEnum(row[2]),
+            "agent_id": row[3],
+
+            "content": row[4],
+            "sha256": row[5],
+            "modality": ModalityEnum(row[6]),
+
+            "lifecycle_state": LifecycleStateEnum(row[7]),
+
+            "created_at": row[8],
+            "last_accessed_at": row[9],
+
+            "access_count": row[10],
+
+            "decay_anchor": row[11],
+            "decay_multiplier": row[12],
+
+            "importance_score": row[13],
+            "salience_score": row[14],
+
+            "vad_v": row[15],
+            "vad_a": row[16],
+            "vad_d": row[17],
+
+            "emotional_class": row[18],
+
+            "provenance": ProvenanceEnum(row[19]),
+            "provenance_confidence": row[20],
+
+            "graph_node_id": row[21],
+
+            "forward_ref": (
+                coerce_uuid(row[22])
+                if row[22]
+                else None
+            ),
+
+            "tags": json_loads(row[23]),
+
+            "metadata": json_loads(row[24]),
+        }
+
+        # =================================================
+        # Episodic
+        # =================================================
+
+        if row[2] == MemoryTypeEnum.EPISODIC.value:
+
+            ext = conn.execute(
+                """
+                SELECT *
+                FROM episodic_memories
+                WHERE memory_id = ?
+                """,
+                [str(memory_id)],
+            ).fetchone()
+
+            if ext is None:
+                raise MemoryNotFoundError(
+                    f"Episodic extension missing for: {memory_id}"
+                )
+
+            base_data.update(
+                {
+                    "session_id": coerce_uuid(ext[1]),
+                    "turn_index": ext[2],
+                    "speaker_role": SpeakerRoleEnum(ext[3]),
+
+                    "referenced_memory_ids": [
+                        coerce_uuid(x)
+                        for x in json_loads(ext[4])
+                    ],
+
+                    "emotional_snapshot": (
+                        json_loads(ext[5])
+                        if ext[5]
+                        else None
+                    ),
+
+                    "is_system_message": ext[6],
+
+                    "tool_call_id": ext[7],
+                }
+            )
+
+            return EpisodicMemory(**base_data)
+
+        # =================================================
+        # Working
+        # =================================================
+
+        elif row[2] == MemoryTypeEnum.WORKING.value:
+
+            ext = conn.execute(
+                """
+                SELECT *
+                FROM working_memories
+                WHERE memory_id = ?
+                """,
+                [str(memory_id)],
+            ).fetchone()
+
+            if ext is None:
+                raise MemoryNotFoundError(
+                    f"Working extension missing for: {memory_id}"
+                )
+
+            base_data.update(
+                {
+                    "session_id": coerce_uuid(ext[1]),
+
+                    "ttl_seconds": ext[2],
+
+                    "promoted_to": (
+                        coerce_uuid(ext[3])
+                        if ext[3]
+                        else None
+                    ),
+
+                    "scratch_data": json_loads(ext[4]),
+
+                    "expires_at": ext[5],
+                }
+            )
+
+            return WorkingMemory(**base_data)
+        
+        # =================================================
+        # Semantic
+        # =================================================
+
+        elif row[2] == MemoryTypeEnum.SEMANTIC.value:
+
+            ext = conn.execute(
+                """
+                SELECT *
+                FROM semantic_memories
+                WHERE memory_id = ?
+                """,
+                [str(memory_id)],
+            ).fetchone()
+
+            if ext is None:
+                raise MemoryNotFoundError(
+                    f"Semantic extension missing for: {memory_id}"
+                )
+
+            base_data.update(
+                {
+                    "entity": ext[1],
+
+                    "relation": ext[2],
+
+                    "object_value": ext[3],
+
+                    "confidence": ext[4],
+
+                    "entity_type": ext[5],
+
+                    "object_type": ext[6],
+
+                    "source_url": ext[7],
+
+                    "contradicted_by": [
+                        coerce_uuid(x)
+                        for x in (
+                            ext[8]
+                            if isinstance(ext[8], (list, np.ndarray))
+                            else json_loads(ext[8])
+                        )
+                    ],
+
+                    "promoted_from": (
+                        coerce_uuid(ext[9])
+                        if ext[9]
+                        else None
+                    ),
+                }
+            )
+
+            return SemanticMemory(**base_data)
+        
+        # =================================================
+        # Procedural
+        # =================================================
+
+        elif row[2] == MemoryTypeEnum.PROCEDURAL.value:
+
+            ext = conn.execute(
+                """
+                SELECT *
+                FROM procedural_memories
+                WHERE memory_id = ?
+                """,
+                [str(memory_id)],
+            ).fetchone()
+
+            if ext is None:
+                raise MemoryNotFoundError(
+                    f"Procedural extension missing for: {memory_id}"
+                )
+
+            base_data.update(
+                {
+                    "trigger_condition": ext[1],
+
+                    "steps": list(ext[2]) if isinstance(ext[2], (list, np.ndarray)) else json_loads(ext[2]),
+
+                    "success_count": ext[3],
+
+                    "failure_count": ext[4],
+
+                    "avg_execution_time_ms": ext[5],
+
+                    "abstracted_from": [
+                        coerce_uuid(x)
+                        for x in (
+                            ext[6] if isinstance(ext[6], (list, np.ndarray))
+                            else json_loads(ext[6])
+                        )
+                    ],
+
+                    "domain": ext[7],
+                }
+            )
+
+            return ProceduralMemory(**base_data)
+
+        return BaseMemory(**base_data)
+
     def get_memory(
         self,
         memory_id: UUID,
     ) -> BaseMemory:
         
         with self._connect() as conn:
-
-            row = conn.execute(
-                """
-                SELECT
-                    memory_id,
-                    schema_version,
-                    memory_type,
-                    agent_id,
-                    content,
-                    sha256,
-                    modality,
-                    lifecycle_state,
-                    created_at,
-                    last_accessed_at,
-                    access_count,
-                    decay_anchor,
-                    decay_multiplier,
-                    importance_score,
-                    salience_score,
-                    vad_v,
-                    vad_a,
-                    vad_d,
-                    emotional_class,
-                    provenance,
-                    provenance_confidence,
-                    graph_node_id,
-                    forward_ref,
-                    tags,
-                    metadata
-                FROM memories
-                WHERE memory_id = ?
-                """,
-                [str(memory_id)],
-            ).fetchone()
-
-            if row is None:
-                raise MemoryNotFoundError(
-                    f"Memory not found: {memory_id}"
-                )
-
-            base_data = {
-                "memory_id": coerce_uuid(row[0]),
-                "schema_version": row[1],
-                "memory_type": MemoryTypeEnum(row[2]),
-                "agent_id": row[3],
-
-                "content": row[4],
-                "sha256": row[5],
-                "modality": ModalityEnum(row[6]),
-
-                "lifecycle_state": LifecycleStateEnum(row[7]),
-
-                "created_at": row[8],
-                "last_accessed_at": row[9],
-
-                "access_count": row[10],
-
-                "decay_anchor": row[11],
-                "decay_multiplier": row[12],
-
-                "importance_score": row[13],
-                "salience_score": row[14],
-
-                "vad_v": row[15],
-                "vad_a": row[16],
-                "vad_d": row[17],
-
-                "emotional_class": row[18],
-
-                "provenance": ProvenanceEnum(row[19]),
-                "provenance_confidence": row[20],
-
-                "graph_node_id": row[21],
-
-                "forward_ref": (
-                    coerce_uuid(row[22])
-                    if row[22]
-                    else None
-                ),
-
-                "tags": json_loads(row[23]),
-
-                "metadata": json_loads(row[24]),
-            }
-
-            # =================================================
-            # Episodic
-            # =================================================
-
-            if row[2] == MemoryTypeEnum.EPISODIC.value:
-
-                ext = conn.execute(
-                    """
-                    SELECT *
-                    FROM episodic_memories
-                    WHERE memory_id = ?
-                    """,
-                    [str(memory_id)],
-                ).fetchone()
-
-                if ext is None:
-                    raise MemoryNotFoundError(
-                        f"Episodic extension missing for: {memory_id}"
-                    )
-
-                base_data.update(
-                    {
-                        "session_id": coerce_uuid(ext[1]),
-                        "turn_index": ext[2],
-                        "speaker_role": SpeakerRoleEnum(ext[3]),
-
-                        "referenced_memory_ids": [
-                            coerce_uuid(x)
-                            for x in json_loads(ext[4])
-                        ],
-
-                        "emotional_snapshot": (
-                            json_loads(ext[5])
-                            if ext[5]
-                            else None
-                        ),
-
-                        "is_system_message": ext[6],
-
-                        "tool_call_id": ext[7],
-                    }
-                )
-
-                return EpisodicMemory(**base_data)
-
-            # =================================================
-            # Working
-            # =================================================
-
-            elif row[2] == MemoryTypeEnum.WORKING.value:
-
-                ext = conn.execute(
-                    """
-                    SELECT *
-                    FROM working_memories
-                    WHERE memory_id = ?
-                    """,
-                    [str(memory_id)],
-                ).fetchone()
-
-                if ext is None:
-                    raise MemoryNotFoundError(
-                        f"Working extension missing for: {memory_id}"
-                    )
-
-                base_data.update(
-                    {
-                        "session_id": coerce_uuid(ext[1]),
-
-                        "ttl_seconds": ext[2],
-
-                        "promoted_to": (
-                            coerce_uuid(ext[3])
-                            if ext[3]
-                            else None
-                        ),
-
-                        "scratch_data": json_loads(ext[4]),
-
-                        "expires_at": ext[5],
-                    }
-                )
-
-                return WorkingMemory(**base_data)
-            
-            # =================================================
-            # Semantic
-            # =================================================
-
-            elif row[2] == MemoryTypeEnum.SEMANTIC.value:
-
-                ext = conn.execute(
-                    """
-                    SELECT *
-                    FROM semantic_memories
-                    WHERE memory_id = ?
-                    """,
-                    [str(memory_id)],
-                ).fetchone()
-
-                if ext is None:
-                    raise MemoryNotFoundError(
-                        f"Semantic extension missing for: {memory_id}"
-                    )
-
-                base_data.update(
-                    {
-                        "entity": ext[1],
-
-                        "relation": ext[2],
-
-                        "object_value": ext[3],
-
-                        "confidence": ext[4],
-
-                        "entity_type": ext[5],
-
-                        "object_type": ext[6],
-
-                        "source_url": ext[7],
-
-                        "contradicted_by": [
-                            coerce_uuid(x)
-                            for x in (
-                                ext[8]
-                                if isinstance(ext[8], (list, np.ndarray))
-                                else json_loads(ext[8])
-                            )
-                        ],
-
-                        "promoted_from": (
-                            coerce_uuid(ext[9])
-                            if ext[9]
-                            else None
-                        ),
-                    }
-                )
-
-                return SemanticMemory(**base_data)
-            
-            # =================================================
-            # Procedural
-            # =================================================
-
-            elif row[2] == MemoryTypeEnum.PROCEDURAL.value:
-
-                ext = conn.execute(
-                    """
-                    SELECT *
-                    FROM procedural_memories
-                    WHERE memory_id = ?
-                    """,
-                    [str(memory_id)],
-                ).fetchone()
-
-                if ext is None:
-                    raise MemoryNotFoundError(
-                        f"Procedural extension missing for: {memory_id}"
-                    )
-
-                base_data.update(
-                    {
-                        "trigger_condition": ext[1],
-
-                        "steps": list(ext[2]) if isinstance(ext[2], (list, np.ndarray)) else json_loads(ext[2]),
-
-                        "success_count": ext[3],
-
-                        "failure_count": ext[4],
-
-                        "avg_execution_time_ms": ext[5],
-
-                        "abstracted_from": [
-                            coerce_uuid(x)
-                            for x in (
-                                ext[6] if isinstance(ext[6], (list, np.ndarray))
-                                else json_loads(ext[6])
-                            )
-                        ],
-
-                        "domain": ext[7],
-                    }
-                )
-
-                return ProceduralMemory(**base_data)
-
-            return BaseMemory(**base_data)
+            return self._get_memory_with_conn(conn, memory_id)
     
     # ========================================================
     # ACCESS METADATA
@@ -1074,21 +1083,21 @@ class DuckDBStore:
             ["?"] * len(memory_ids)
         )
 
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT memory_id
-                FROM memories
-                WHERE agent_id = ?
-                  AND memory_id IN ({placeholders})
-                """,
-                [agent_id, *map(str, memory_ids)],
-            ).fetchall()
+        def _fetch_all():
+            with self._connect() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT memory_id
+                    FROM memories
+                    WHERE agent_id = ?
+                      AND memory_id IN ({placeholders})
+                    """,
+                    [agent_id, *map(str, memory_ids)],
+                ).fetchall()
+                
+                return [self._get_memory_with_conn(conn, coerce_uuid(r[0])) for r in rows]
 
-        return await asyncio.to_thread(
-            lambda rows: [self.get_memory(coerce_uuid(r[0])) for r in rows],
-            rows
-        )
+        return await asyncio.to_thread(_fetch_all)
 
     def projection_exists(
         self,
@@ -1147,7 +1156,7 @@ class DuckDBStore:
             with self._connect() as conn:
                 conn.execute(
                     """
-                    UPDATE memories
+                    UPDATE semantic_memories
                     SET contradicted_by = ?
                     WHERE memory_id = ?
                     """,

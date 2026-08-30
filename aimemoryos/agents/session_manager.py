@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from aimemoryos.memory.working import WorkingMemory
 
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class SessionManager:
         self.session_ttl_minutes = session_ttl_minutes
         self.max_working_memories = max_working_memories
         self._sessions: dict[UUID, AgentSession] = {}
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -98,7 +100,8 @@ class SessionManager:
             expires_at=now + timedelta(minutes=self.session_ttl_minutes),
             metadata=metadata or {},
         )
-        self._sessions[session.session_id] = session
+        with self._lock:
+            self._sessions[session.session_id] = session
         logger.debug(
             "session_manager | session created | "
             "agent_id={} session_id={} ttl_minutes={}",
@@ -112,7 +115,8 @@ class SessionManager:
 
         Expired sessions are closed lazily on this call.
         """
-        session = self._sessions.get(session_id)
+        with self._lock:
+            session = self._sessions.get(session_id)
         if session is None:
             return None
         if self.is_expired(session):
@@ -127,7 +131,8 @@ class SessionManager:
         Called internally by add_working_memory and advance_turn.
         No-op if the session does not exist.
         """
-        session = self._sessions.get(session_id)
+        with self._lock:
+            session = self._sessions.get(session_id)
         if session is None:
             return
         session.expires_at = (
@@ -142,11 +147,12 @@ class SessionManager:
         promotable (promoted_to set), the caller is responsible for
         having already persisted them via StorageOrchestrator.
         """
-        session = self._sessions.get(session_id)
-        if session is None:
-            return
-        session.active = False
-        self._sessions.pop(session_id, None)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return
+            session.active = False
+            self._sessions.pop(session_id, None)
         logger.debug(
             "session_manager | session closed | session_id={}", session_id
         )
@@ -234,9 +240,10 @@ class SessionManager:
         Returns the number of sessions closed. Safe to call from a
         background scheduler (core/scheduler.py).
         """
-        expired_ids = [
-            sid for sid, s in self._sessions.items() if self.is_expired(s)
-        ]
+        with self._lock:
+            expired_ids = [
+                sid for sid, s in self._sessions.items() if self.is_expired(s)
+            ]
         for sid in expired_ids:
             self.close_session(session_id=sid)
         if expired_ids:
@@ -255,7 +262,8 @@ class SessionManager:
 
         Returns counts of active sessions and their total working memories.
         """
-        active = [s for s in self._sessions.values() if not self.is_expired(s)]
+        with self._lock:
+            active = [s for s in self._sessions.values() if not self.is_expired(s)]
         return {
             "active_sessions": len(active),
             "working_memories": sum(len(s.working_memories) for s in active),
