@@ -18,6 +18,8 @@ from aimemoryos.memory.models import (
 from aimemoryos.retrieval.context_assembler import ContextAssembler
 from aimemoryos.retrieval.vector_retriever import VectorRetriever, VectorCandidate
 
+from aimemoryos.retrieval.fusion import fuse_memory_results
+
 # ============================================================
 # RETRIEVAL TRACE
 # ============================================================
@@ -392,58 +394,14 @@ class RetrievalEngine:
         secondary: list[MemoryResult],
     ) -> list[MemoryResult]:
         """
-        Merges two ranked result lists.
-        Deduplicates by memory_id, keeps highest score.
-        Replace with full RRF fusion.
+        Merges vector (primary) and graph (secondary) result lists using RRF.
         """
-
-        merged: dict[UUID, MemoryResult] = {
-            r.memory.memory_id: r for r in primary
-        }
-
-        for result in secondary:
-            mid = result.memory.memory_id
-            existing = merged.get(mid)
-
-            if existing is None:
-                merged[mid] = result
-                continue
-
-            if result.trace.final_score <= existing.trace.final_score:
-                continue
-
-            # Higher score from graph — merge traces
-            merged[mid] = MemoryResult(
-                memory=existing.memory,
-                trace=RetrievalTrace(
-                    memory_id=str(existing.memory.memory_id),
-                    final_score=result.trace.final_score,
-                    retrieved_by=sorted(
-                        set(existing.trace.retrieved_by + result.trace.retrieved_by)
-                    ),
-                    vector_rank=existing.trace.vector_rank,
-                    graph_rank=result.trace.graph_rank,
-                    temporal_rank=existing.trace.temporal_rank,
-                    importance_score=existing.trace.importance_score,
-                    recency_boost=existing.trace.recency_boost,
-                    activation_boost=max(
-                        existing.trace.activation_boost,
-                        result.trace.activation_boost,
-                    ),
-                    graph_path=result.trace.graph_path or existing.trace.graph_path,
-                    provenance=result.trace.provenance or existing.trace.provenance,
-                    provenance_confidence=max(
-                        existing.trace.provenance_confidence,
-                        result.trace.provenance_confidence,
-                    ),
-                    # trace_metadata={
-                    #     **existing.trace.trace_metadata,
-                    #     **result.trace.trace_metadata,
-                    # },
-                ),
-            )
-
-        return list(merged.values())
+        return fuse_memory_results(
+            ranked_lists={
+                "vector": primary,
+                "graph": secondary,
+            }
+        )
 
     # ──────────────────────────────────────────────────────
     # HELPERS
