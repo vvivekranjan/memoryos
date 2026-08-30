@@ -34,6 +34,8 @@ class MemoryConfig:
             "default_agent_id": cls.default_agent_id,
             "episodic_decay_rate": cls.episodic_decay_rate,
             "semantic_decay_rate": cls.semantic_decay_rate,
+            "vector_weight": cls.vector_weight,
+            "graph_weight": cls.graph_weight,
         }
 
 config = MemoryConfig()
