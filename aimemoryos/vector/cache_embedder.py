@@ -173,7 +173,7 @@ class CacheEmbedder:
                 )
             )
 
-        embedding = pickle.loads(result[0])
+        embedding = np.frombuffer(result[0], dtype=np.float32)
 
         return CacheEmbeddingResult(
             hit=True,
@@ -191,7 +191,7 @@ class CacheEmbedder:
         Persists embedding cache.
         """
 
-        serialized = pickle.dumps(embedding)
+        serialized = embedding.tobytes()
         # DuckDB does not support SQLite's `INSERT OR REPLACE` syntax reliably.
         # Do a safe upsert: delete any existing row with the same primary key
         # then insert the new row. Table name is validated in __init__.

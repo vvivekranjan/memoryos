@@ -49,7 +49,14 @@ class VectorRetriever:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(
-                self.search_async(query_embedding=query_embedding, top_k=top_k)
+                self.search_async(
+                    agent_id=agent_id,
+                    query_embedding=query_embedding,
+                    top_k=top_k,
+                    memory_types=memory_types,
+                    lifecycle_states=lifecycle_states,
+                    min_importance=min_importance,
+                )
             )
 
         raise RuntimeError("Event loop already running; call 'search_async' instead")
@@ -72,6 +79,10 @@ class VectorRetriever:
         results: List[SearchResult] = await self.faiss_store.search_async(
             query_embedding=query_embedding,
             top_k=top_k,
+            agent_id=agent_id,
+            memory_types=memory_types,
+            lifecycle_states=lifecycle_states,
+            min_importance=min_importance,
         )
 
         candidates: list[VectorCandidate] = []
@@ -100,6 +111,10 @@ class VectorRetriever:
         query: str,
         top_k: int = 5,
         score_threshold: float = 0.0,
+        agent_id: str = "default",
+        memory_types: list[MemoryTypeEnum] | None = None,
+        lifecycle_states: list[LifecycleStateEnum] | None = None,
+        min_importance: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """Legacy synchronous convenience wrapper for query-string retrieval."""
 
@@ -114,6 +129,10 @@ class VectorRetriever:
                     query=query,
                     top_k=top_k,
                     score_threshold=score_threshold,
+                    agent_id=agent_id,
+                    memory_types=memory_types,
+                    lifecycle_states=lifecycle_states,
+                    min_importance=min_importance,
                 )
             )
 
@@ -124,6 +143,10 @@ class VectorRetriever:
         query: str,
         top_k: int = 5,
         score_threshold: float = 0.0,
+        agent_id: str = "default",
+        memory_types: list[MemoryTypeEnum] | None = None,
+        lifecycle_states: list[LifecycleStateEnum] | None = None,
+        min_importance: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """Async convenience wrapper for query-string retrieval."""
 
@@ -133,8 +156,12 @@ class VectorRetriever:
         try:
             embeddings = await self.embedder.generate_embeddings([query])
             candidates = await self.search_async(
+                agent_id=agent_id,
                 query_embedding=embeddings[0].tolist(),
                 top_k=top_k,
+                memory_types=memory_types or [],
+                lifecycle_states=lifecycle_states or [],
+                min_importance=min_importance,
             )
 
             if not candidates:

@@ -31,7 +31,7 @@ from aimemoryos.memory.models import (
 from aimemoryos.storage.duckdb_store import DuckDBStore, MemoryNotFoundError
 from aimemoryos.storage.faiss_store import FAISSStore
 from aimemoryos.storage.sqlite_log import SQLiteEventLog
-from aimemoryos.graph.ontology import KuzuDBStore
+from aimemoryos.graph.ontology import FalkorDBStore
 from aimemoryos.storage.hallucination_firewall import HallucinationFirewall
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class StorageOrchestrator:
         duckdb_store: DuckDBStore,
         faiss_store: FAISSStore,
         sqlite_log: SQLiteEventLog,
-        graph_store: Optional[KuzuDBStore] = None,
+        graph_store: Optional[FalkorDBStore] = None,
     ) -> None:
         self.duckdb = duckdb_store
         self.faiss = faiss_store
@@ -395,21 +395,26 @@ class StorageOrchestrator:
                 f"Transition to {new_state!r} rejected for memory_id={memory_id}"
             )
 
-        # Step 1: SQLite MUST succeed before DuckDB update.
-        if self.event_log is not None:
-            self.event_log.log_lifecycle_transition(
-                agent_id=memory.agent_id,
-                payload=LifecycleTransitionPayload(
-                    memory_id=memory.memory_id,
-                    old_state=old_state,
-                    new_state=new_state,
-                    trigger=TriggerEnum.MANUAL,
-                    importance_at_transition=memory.importance_score,
-                ),
-            )
+        # Step 1 & 2 in a try/except block to handle partial failures
+        try:
+            if self.event_log is not None:
+                self.event_log.log_lifecycle_transition(
+                    agent_id=memory.agent_id,
+                    payload=LifecycleTransitionPayload(
+                        memory_id=memory.memory_id,
+                        old_state=old_state,
+                        new_state=new_state,
+                        trigger=TriggerEnum.MANUAL,
+                        importance_at_transition=memory.importance_score,
+                    ),
+                )
 
-        # Step 2: DuckDB state update.
-        self.duckdb.apply_lifecycle_transition(memory_id, new_state)
+            # Step 2: DuckDB state update.
+            self.duckdb.apply_lifecycle_transition(memory_id, new_state)
+
+        except Exception as exc:
+            logger.error("Partial failure during lifecycle transition for memory %s: %s", memory_id, exc)
+            raise RuntimeError(f"Partial failure during lifecycle transition: {exc}") from exc
 
     async def forget_memory(self, memory_id: UUID) -> TransactionResult:
         """
@@ -419,8 +424,8 @@ class StorageOrchestrator:
             memory = self.duckdb.get_memory(memory_id)
         except MemoryNotFoundError:
             return TransactionResult(
-                success=False, 
-                rollback_performed=False, 
+                success=False,
+                rollback_performed=False,
                 error=f"Memory {memory_id} not found"
             )
 
@@ -477,18 +482,7 @@ class StorageOrchestrator:
         boundaries. This method exists as an orchestration
         placeholder with the correct exception contract.
         """
-        try:
-            # IMPORTANT:
-            # Full replay engine intentionally deferred
-            # to replay/reconstructor.py
-            #
-            # This method currently exists as orchestration
-            # placeholder to preserve architecture boundaries.
-
-            return TransactionResult(success=True)
-
-        except (MemoryNotFoundError, Exception) as exc:
-            raise ReplayRebuildError(str(exc)) from exc
+        return TransactionResult(success=False, error="Not implemented")
 
     # ------------------------------------------------------------------
     # Health probe
@@ -508,4 +502,3 @@ class StorageOrchestrator:
             "graph_store": "healthy" if self.graph is not None else "not_configured",
             "orchestrator": "healthy",
         }
-

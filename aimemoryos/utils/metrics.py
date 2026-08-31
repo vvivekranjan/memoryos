@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
 from time import perf_counter
@@ -78,7 +79,7 @@ class HistogramMetric:
     """
 
     name: str
-    observations: list[float] = field(default_factory=list)
+    observations: deque[float] = field(default_factory=lambda: deque(maxlen=1000))
     labels: dict[str, str] = field(default_factory=dict)
     _lock: Lock = field(default_factory=Lock)
 

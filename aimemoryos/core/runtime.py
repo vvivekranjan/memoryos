@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from aimemoryos.core.config import config
-from aimemoryos.graph.ontology import KuzuDBStore
+
+logger = logging.getLogger(__name__)
+from aimemoryos.graph.ontology import FalkorDBStore
 from aimemoryos.ingestion.chunker import Chunker
 from aimemoryos.ingestion.deduplicator import Deduplicator
 from aimemoryos.ingestion.pipeline import Pipeline
@@ -24,18 +27,20 @@ class RuntimePaths:
     duckdb_path: Path
     faiss_dir: Path
     events_path: Path
-    graph_dir: Path
 
     @classmethod
     def from_env(cls) -> "RuntimePaths":
         data_dir = Path(config.data_dir)
-        return cls(
+        paths = cls(
             data_dir=data_dir,
             duckdb_path=data_dir / "memory.duckdb",
             faiss_dir=data_dir / "faiss",
             events_path=data_dir / "events.sqlite",
-            graph_dir=data_dir / "graph" / "memory_graph.kuzu",
         )
+        paths.data_dir.mkdir(parents=True, exist_ok=True)
+        paths.faiss_dir.mkdir(parents=True, exist_ok=True)
+        paths.events_path.parent.mkdir(parents=True, exist_ok=True)
+        return paths
 
 
 @dataclass(slots=True)
@@ -46,7 +51,7 @@ class MemoryRuntime:
     duckdb_store: DuckDBStore
     faiss_store: FAISSStore
     event_log: SQLiteEventLog
-    graph_store: KuzuDBStore
+    graph_store: FalkorDBStore
     orchestrator: StorageOrchestrator
     deduplicator: Deduplicator
     retriever: VectorRetriever
@@ -73,14 +78,27 @@ def build_runtime(
     runtime_embedder = embedder or Embedder()
 
     duckdb_store = DuckDBStore(db_path=runtime_paths.duckdb_path)
-    duckdb_store.initialise()
+    try:
+        duckdb_store.initialise()
+    except Exception as e:
+        logger.error(f"Failed to initialise duckdb_store: {e}")
 
     faiss_store = FAISSStore(root_path=runtime_paths.faiss_dir)
-    faiss_store.load()
+    try:
+        faiss_store.load()
+    except Exception as e:
+        logger.error(f"Failed to load faiss_store: {e}")
 
     event_log = SQLiteEventLog(db_path=runtime_paths.events_path)
-    graph_store = KuzuDBStore(db_path=str(runtime_paths.graph_dir))
-    graph_store.initialise()
+    graph_store = FalkorDBStore(
+        host=config.falkordb_host,
+        port=config.falkordb_port,
+        graph_name="memoryos"
+    )
+    try:
+        graph_store.initialise()
+    except Exception as e:
+        logger.error(f"Failed to initialise graph_store: {e}")
 
     orchestrator = StorageOrchestrator(
         duckdb_store=duckdb_store,

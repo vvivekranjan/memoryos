@@ -27,11 +27,11 @@ class SpreadingActivation:
         if not session_scope or not session_scope.working_memory_ids:
             return
             
-        working_set = set(session_scope.working_memory_ids)
+        working_set = {str(mid) for mid in session_scope.working_memory_ids}
         
         for candidate in candidates:
             # If the candidate is directly in the working set, huge boost
-            if candidate.memory_id in working_set:
+            if str(candidate.memory_id) in working_set:
                 candidate.trace.activation_boost = 1.5
                 candidate.final_score *= 1.5
             

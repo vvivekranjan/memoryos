@@ -212,48 +212,49 @@ class SQLiteEventLog:
         Per-agent monotonic sequence.
         """
 
-        row = self.conn.execute(
-            """
-            SELECT current_sequence
-            FROM agent_sequences
-            WHERE agent_id = ?
-            """,
-            (agent_id,),
-        ).fetchone()
+        with self.conn:
+            row = self.conn.execute(
+                """
+                SELECT current_sequence
+                FROM agent_sequences
+                WHERE agent_id = ?
+                """,
+                (agent_id,),
+            ).fetchone()
 
-        if row is None:
+            if row is None:
+
+                self.conn.execute(
+                    """
+                    INSERT INTO agent_sequences(
+                        agent_id,
+                        current_sequence
+                    )
+                    VALUES (?, ?)
+                    """,
+                    (agent_id, 0),
+                )
+
+                return 0
+
+            next_seq = (
+                row["current_sequence"]
+                + 1
+            )
 
             self.conn.execute(
                 """
-                INSERT INTO agent_sequences(
-                    agent_id,
-                    current_sequence
-                )
-                VALUES (?, ?)
+                UPDATE agent_sequences
+                SET current_sequence = ?
+                WHERE agent_id = ?
                 """,
-                (agent_id, 0),
+                (
+                    next_seq,
+                    agent_id,
+                ),
             )
 
-            return 0
-
-        next_seq = (
-            row["current_sequence"]
-            + 1
-        )
-
-        self.conn.execute(
-            """
-            UPDATE agent_sequences
-            SET current_sequence = ?
-            WHERE agent_id = ?
-            """,
-            (
-                next_seq,
-                agent_id,
-            ),
-        )
-
-        return next_seq
+            return next_seq
 
     def _write_txn(
         self,
@@ -665,42 +666,43 @@ class SQLiteEventLog:
         Returns checksum validity per event.
         """
 
-        rows = self.conn.execute(
-            """
-            SELECT
-                event_id,
-                schema_version,
-                event_type,
-                occurred_at,
-                sequence_num,
-                payload,
-                checksum
-            FROM events
-            WHERE agent_id = ?
-            """,
-            (agent_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT
+                    event_id,
+                    schema_version,
+                    event_type,
+                    occurred_at,
+                    sequence_num,
+                    payload,
+                    checksum
+                FROM events
+                WHERE agent_id = ?
+                """,
+                (agent_id,),
+            ).fetchall()
 
-        results: list[dict] = []
+            results: list[dict] = []
 
-        for row in rows:
-            expected = self.compute_checksum(
-                event_id=row["event_id"],
-                schema_version=row["schema_version"],
-                event_type=row["event_type"],
-                occurred_at=row["occurred_at"],
-                sequence_num=row["sequence_num"],
-                payload=row["payload"],
-            )
+            for row in rows:
+                expected = self.compute_checksum(
+                    event_id=row["event_id"],
+                    schema_version=row["schema_version"],
+                    event_type=row["event_type"],
+                    occurred_at=row["occurred_at"],
+                    sequence_num=row["sequence_num"],
+                    payload=row["payload"],
+                )
 
-            results.append(
-                {
-                    "event_id": row["event_id"],
-                    "valid": expected == row["checksum"],
-                }
-            )
+                results.append(
+                    {
+                        "event_id": row["event_id"],
+                        "valid": expected == row["checksum"],
+                    }
+                )
 
-        return results
+            return results
 
     def load_sequence_numbers(
         self,
@@ -711,17 +713,18 @@ class SQLiteEventLog:
         Returns all sequence numbers for an agent.
         """
 
-        rows = self.conn.execute(
-            """
-            SELECT sequence_num
-            FROM events
-            WHERE agent_id = ?
-            ORDER BY sequence_num ASC
-            """,
-            (agent_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT sequence_num
+                FROM events
+                WHERE agent_id = ?
+                ORDER BY sequence_num ASC
+                """,
+                (agent_id,),
+            ).fetchall()
 
-        return [row[0] for row in rows]
+            return [row[0] for row in rows]
 
     def get_unresolved_transactions(
         self,
@@ -730,20 +733,21 @@ class SQLiteEventLog:
         Returns unresolved transactions.
         """
 
-        rows = self.conn.execute(
-            """
-            SELECT *
-            FROM event_transactions
-            WHERE state != ?
-            """,
-            (
-                TransactionStateEnum
-                .COMMITTED
-                .value,
-            ),
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT *
+                FROM event_transactions
+                WHERE state != ?
+                """,
+                (
+                    TransactionStateEnum
+                    .COMMITTED
+                    .value,
+                ),
+            ).fetchall()
 
-        return list(rows)
+            return list(rows)
 
     # def heal_pending_transactions(self) -> int:
     #     """
@@ -779,50 +783,51 @@ class SQLiteEventLog:
         Detects corrupted events.
         """
 
-        query = (
-            "SELECT * FROM events"
-        )
-
-        params: list = []
-
-        if agent_id:
-
-            query += (
-                " WHERE agent_id = ?"
+        with self._lock:
+            query = (
+                "SELECT * FROM events"
             )
 
-            params.append(agent_id)
+            params: list = []
 
-        rows = self.conn.execute(
-            query,
-            params,
-        ).fetchall()
+            if agent_id:
 
-        corrupted: list[
-            UUID
-        ] = []
-
-        for row in rows:
-
-            expected = (
-                self.compute_checksum(
-                    event_id=row["event_id"],
-                    schema_version=row["schema_version"],
-                    event_type=row["event_type"],
-                    occurred_at=row["occurred_at"],
-                    sequence_num=row["sequence_num"],
-                    payload=row["payload"],
+                query += (
+                    " WHERE agent_id = ?"
                 )
-            )
 
-            if (expected != row["checksum"]):
-                corrupted.append(
-                    UUID(
-                        row["event_id"]
+                params.append(agent_id)
+
+            rows = self.conn.execute(
+                query,
+                params,
+            ).fetchall()
+
+            corrupted: list[
+                UUID
+            ] = []
+
+            for row in rows:
+
+                expected = (
+                    self.compute_checksum(
+                        event_id=row["event_id"],
+                        schema_version=row["schema_version"],
+                        event_type=row["event_type"],
+                        occurred_at=row["occurred_at"],
+                        sequence_num=row["sequence_num"],
+                        payload=row["payload"],
                     )
                 )
 
-        return corrupted
+                if (expected != row["checksum"]):
+                    corrupted.append(
+                        UUID(
+                            row["event_id"]
+                        )
+                    )
+
+            return corrupted
 
     def log_ingestion(
         self,

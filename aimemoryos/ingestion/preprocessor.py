@@ -7,6 +7,8 @@ class Preprocessor:
         self.pii_patterns = [
             (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), '[SSN REDACTED]'), # SSN
             (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[EMAIL REDACTED]'), # Email
+            (re.compile(r'\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'), '[PHONE REDACTED]'), # Phone
+            (re.compile(r'\b(?:\d[ -]*?){13,16}\b'), '[CC REDACTED]'), # Credit Card
         ]
         
     async def clean(self, text: str) -> str:

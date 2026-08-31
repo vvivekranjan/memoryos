@@ -15,11 +15,22 @@ class MemoryConfig:
     default_agent_id: str = "default"
     episodic_decay_rate: float = 0.1
     semantic_decay_rate: float = 0.01
+    vector_weight: float = 0.7
+    graph_weight: float = 0.3
+    falkordb_host: str = "127.0.0.1"
+    falkordb_port: int = 6379
 
     def __init__(self, **kwargs):
         env = os.environ.get
         for key, default in self._defaults().items():
-            setattr(self, key, env(f"AIMEMORYOS_{key.upper()}", kwargs.get(key, default)))
+            val = env(f"AIMEMORYOS_{key.upper()}", kwargs.get(key, default))
+            if isinstance(default, int):
+                val = int(val)
+            elif isinstance(default, float):
+                val = float(val)
+            elif isinstance(default, bool):
+                val = str(val).lower() in ("true", "1", "yes")
+            setattr(self, key, val)
 
     @classmethod
     def _defaults(cls):
@@ -36,6 +47,8 @@ class MemoryConfig:
             "semantic_decay_rate": cls.semantic_decay_rate,
             "vector_weight": cls.vector_weight,
             "graph_weight": cls.graph_weight,
+            "falkordb_host": cls.falkordb_host,
+            "falkordb_port": cls.falkordb_port,
         }
 
 config = MemoryConfig()
