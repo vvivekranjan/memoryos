@@ -12,7 +12,7 @@ DECAY_PER_HOP: float = 0.5
 #: Hard cap on activation_boost to prevent FM-T2 activation explosion.
 ACTIVATION_BOOST_CAP: float = 1.0
 
-#: Default BFS result limit — matches KuzuDBStore.bfs_traversal_async default.
+#: Default BFS result limit — matches FalkorDBStore.bfs_traversal_async default.
 DEFAULT_LIMIT: int = 50
 
 
@@ -46,7 +46,7 @@ class TraversalResult:
     activation_boost: hop-decayed activation contribution (TRD §5.4)
     traversal_score : confidence × activation_boost; used by fusion layer
     path            : ordered list of node_ids traversed (when available)
-    raw             : original dict from KuzuDBStore for passthrough fields
+    raw             : original dict from FalkorDBStore for passthrough fields
     """
 
     __slots__ = (
@@ -104,7 +104,7 @@ async def bfs_traversal(
     BFS expansion from seed node IDs up to max_hops deep.
 
     This is the public entry point for RetrievalEngine._expand_graph.
-    It owns all graph algorithm concerns that KuzuDBStore must not:
+    It owns all graph algorithm concerns that FalkorDBStore must not:
 
       1. Limit propagation — passes limit through to store.bfs_traversal_async.
          Previously this was dropped, causing RetrievalEngine to always get
@@ -144,7 +144,7 @@ async def bfs_traversal(
     if not isinstance(store, GraphStore):
         logger.warning(
             "graph.traversal | store does not satisfy GraphStore protocol | "
-            "type={}", type(store).__name__,
+            "type=%s", type(store).__name__,
         )
 
     # Fetch raw BFS results from the graph store.
@@ -158,7 +158,7 @@ async def bfs_traversal(
     except Exception as exc:
         logger.warning(
             "graph.traversal | bfs_traversal_async failed | "
-            "seeds={} max_hops={} | error={}", seeds, max_hops, exc,
+            "seeds=%s max_hops=%s | error=%s", seeds, max_hops, exc,
         )
         return []
 

@@ -126,10 +126,68 @@ def test_bfs_traversal_async_query():
 
         mock_result = MagicMock()
         mock_result.result_set = [["seed1", "nodeA", 1], ["seed1", "nodeB", 2]]
-        store.graph.query = AsyncMock(return_value=mock_result)
+        store.graph.ro_query = AsyncMock(return_value=mock_result)
 
         records = await store.bfs_traversal_async(seeds=["seed1"], max_hops=2, limit=10)
         assert len(records) == 2
         assert records[0] == {"start_id": "seed1", "end_id": "nodeA", "hop": 1}
         assert records[1] == {"start_id": "seed1", "end_id": "nodeB", "hop": 2}
+        store.graph.ro_query.assert_called_once()
     asyncio.run(_test())
+
+
+def test_get_node_ro_query():
+    async def _test():
+        store = FalkorDBStore()
+        store._initialised = True
+        store.graph = MagicMock()
+
+        mock_result = MagicMock()
+        mock_result.result_set = [["node-123", "CONCEPT", "AI Memory", 0.95, "2026-08-31T12:00:00+00:00"]]
+        store.graph.ro_query = AsyncMock(return_value=mock_result)
+
+        node = await store.get_node("node-123")
+        assert node is not None
+        assert node["node_id"] == "node-123"
+        assert node["entity_type"] == "CONCEPT"
+        assert node["label"] == "AI Memory"
+        assert node["importance"] == 0.95
+        store.graph.ro_query.assert_called_once()
+    asyncio.run(_test())
+
+
+def test_save_edge_and_cooccurrence():
+    async def _test():
+        store = FalkorDBStore()
+        store._initialised = True
+        store.graph = MagicMock()
+        store.graph.query = AsyncMock()
+
+        await store.save_edge("n1", "n2", "RELATES_TO", confidence=0.8, memory_id="m1", rel_table="RELATES")
+        store.graph.query.assert_called_once()
+        assert "MERGE (a)-[r:RELATES]->(b)" in store.graph.query.call_args[0][0]
+
+        store.graph.query.reset_mock()
+        await store.increment_cooccurrence("n1", "n2")
+        store.graph.query.assert_called_once()
+        assert "MERGE (a)-[r:COOCCURS]->(b)" in store.graph.query.call_args[0][0]
+
+        # Invalid relation table raises ValueError
+        with pytest.raises(ValueError):
+            await store.save_edge("n1", "n2", "INVALID", rel_table="UNKNOWN")
+    asyncio.run(_test())
+
+
+def test_aclose_and_context_manager():
+    async def _test():
+        store = FalkorDBStore()
+        store._initialised = True
+        mock_client = MagicMock()
+        mock_client.aclose = AsyncMock()
+        store.client = mock_client
+
+        await store.aclose()
+        mock_client.aclose.assert_called_once()
+        assert store._initialised is False
+    asyncio.run(_test())
+

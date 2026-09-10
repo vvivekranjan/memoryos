@@ -18,8 +18,6 @@ from aimemoryos.memory.models import (
 from aimemoryos.retrieval.context_assembler import ContextAssembler
 from aimemoryos.retrieval.vector_retriever import VectorRetriever, VectorCandidate
 
-from aimemoryos.retrieval.fusion import fuse_memory_results
-
 # ============================================================
 # RETRIEVAL TRACE
 # ============================================================
@@ -72,6 +70,9 @@ class RetrievalCandidate:
     memory_type: MemoryTypeEnum
     final_score: float
     trace: RetrievalTrace
+
+
+from aimemoryos.retrieval.fusion import fuse_memory_results
 
 
 class MemoryStore(Protocol):

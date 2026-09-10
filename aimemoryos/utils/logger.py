@@ -63,6 +63,7 @@ class JsonFormatter(logging.Formatter):
 
         ALLOWED_EXTRA_KEYS = {
             "subsystem",
+            "component",
             "exception_type",
             "memory_id",
             "agent_id",

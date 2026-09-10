@@ -73,7 +73,7 @@ class StorageOrchestrator:
         When absent, graph writes are silently skipped (not an error).
 
     WRITE ORDER:
-      SQLite → DuckDB → FAISS → KuzuDB (best-effort)
+      SQLite → DuckDB → FAISS → FalkorDB (best-effort)
 
     FIREWALL:
       IMAGINED and HYPOTHESISED memories are routed to isolated tables.
@@ -150,7 +150,7 @@ class StorageOrchestrator:
           3. SQLite event log        — MUST succeed; abort if it fails
           4. DuckDB state write      — memory document
           5. FAISS vector index      — skip for unpromoted WorkingMemory
-          6. KuzuDB graph write      — best-effort; divergence logged
+          6. FalkorDB graph write    — best-effort; divergence logged
 
         If step 3 (SQLite) fails, steps 4-6 are NOT executed (INV-RC-001).
         If step 4 (DuckDB) fails, a failure TransactionResult is returned;
@@ -267,7 +267,7 @@ class StorageOrchestrator:
                     error=f"FAISS write failed: {exc}",
                 )
 
-        # ---- Step 4: KuzuDB graph write (best-effort) ----
+        # ---- Step 4: FalkorDB graph write (best-effort) ----
         # Failures logged at WARNING; do not fail the transaction.
         # Graph divergence from DuckDB is detected by integrity_checker.py.
         if self.graph is not None:
@@ -277,7 +277,7 @@ class StorageOrchestrator:
         return TransactionResult(success=True)
 
     async def _graph_write_memory(self, memory: BaseMemory) -> None:
-        """Write memory node to KuzuDB (best-effort)."""
+        """Write memory node to FalkorDB (best-effort)."""
         if not hasattr(self.graph, "save_memory"):
             return
         try:
@@ -291,7 +291,7 @@ class StorageOrchestrator:
 
     async def _graph_write_edges(self, memory: BaseMemory) -> None:
         """
-        Write REFERENCES edges to KuzuDB for any related memory IDs found
+        Write REFERENCES edges to FalkorDB for any related memory IDs found
         on the memory object (source_ids, referenced_memory_ids).
 
         REFERENCES rel table links EpisodicMemory cross-references.
@@ -418,7 +418,7 @@ class StorageOrchestrator:
 
     async def forget_memory(self, memory_id: UUID) -> TransactionResult:
         """
-        Coordinated multi-store deletion across SQLite, DuckDB, FAISS, and KuzuDB.
+        Coordinated multi-store deletion across SQLite, DuckDB, FAISS, and FalkorDB.
         """
         try:
             memory = self.duckdb.get_memory(memory_id)

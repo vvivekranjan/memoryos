@@ -3,13 +3,9 @@ from uuid import UUID
 from .engine import RetrievalCandidate
 from aimemoryos.memory.models import SessionScope
 
-try:
-    import kuzu  # type: ignore
-except ImportError:  # pragma: no cover
-    kuzu = None  # type: ignore
+DECAY_PER_HOP = 0.5  # configurable in config.yaml
+SESSION_TTL_S = 3600  # activation resets on session end
 
-DECAY_PER_HOP = 0.5 # configurable in config.yaml
-SESSION_TTL_S = 3600 # activation resets on session end
 
 class SpreadingActivation:
     def __init__(self):

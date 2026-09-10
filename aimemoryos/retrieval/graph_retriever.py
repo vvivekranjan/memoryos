@@ -34,7 +34,7 @@ _DEFAULT_PROVENANCE_CONFIDENCE: float = 1.0
 
 class GraphRetriever:
     """
-    KuzuDB BFS-based retriever.
+    FalkorDB BFS-based retriever.
 
     Traverses the entity graph from seed nodes derived from the query context,
     resolves neighbouring memory_ids from DuckDB, and returns scored
@@ -44,13 +44,13 @@ class GraphRetriever:
     ----------------------
     GraphRetriever: fetches candidates and assembles RetrievalTrace.
     graph/traversal.py: BFS algorithm, hop decay, cycle detection, dedup.
-    graph/ontology.py: KuzuDB I/O.
+    graph/ontology.py: FalkorDB I/O.
     retrieval/fusion.py: RRF fusion across all retrievers.
     """
 
     def __init__(
         self,
-        graph_store: Any,   # KuzuDBStore — typed as Any to avoid circular import
+        graph_store: Any,   # FalkorDBStore — typed as Any to avoid circular import
         doc_store: DocStore,
         max_hops: int = DEFAULT_MAX_HOPS,
     ) -> None:
