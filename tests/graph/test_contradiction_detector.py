@@ -125,7 +125,7 @@ def test_detect_and_flag_orchestration():
         results = await detect_and_flag(
             new_memory=mem1,
             existing_memories=[mem2],
-            kuzu_store=graph_store,
+            graph_store=graph_store,
             duckdb_store=duckdb_store,
         )
 
@@ -134,3 +134,39 @@ def test_detect_and_flag_orchestration():
         assert results[0].relation == "lives_in"
         graph_store.graph.query.assert_called()
     asyncio.run(_test())
+
+
+def test_detect_for_cluster_and_flag_correction():
+    async def _test():
+        graph_store = MagicMock()
+        graph_store._initialised = True
+        graph_store.graph = MagicMock()
+        graph_store.graph.query = AsyncMock()
+
+        duckdb_store = MagicMock()
+        mem1 = make_semantic_memory("Python", "TYPING", "Dynamic", confidence=0.95)
+        mem1.memory_type = "SEMANTIC"
+        mem2 = make_semantic_memory("Python", "TYPING", "Static", confidence=0.40)
+        mem2.memory_type = "SEMANTIC"
+        duckdb_store.get_memory.return_value = mem2
+
+        # Cluster detection
+        cluster_results = await detect_for_cluster(
+            cluster_memories=[mem1, mem2],
+            graph_store=graph_store,
+            duckdb_store=duckdb_store,
+        )
+        assert len(cluster_results) == 1
+
+        # Flag correction
+        corr_result = await flag_correction(
+            superseded_memory=mem2,
+            corrected_memory=mem1,
+            graph_store=graph_store,
+            duckdb_store=duckdb_store,
+        )
+        assert corr_result is not None
+        assert corr_result.object_a == "dynamic"
+        assert corr_result.object_b == "static"
+    asyncio.run(_test())
+

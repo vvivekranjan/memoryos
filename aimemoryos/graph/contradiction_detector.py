@@ -189,7 +189,7 @@ def _find_contradictions(
         if score < CONTRADICTION_SCORE_GATE:
             logger.debug(
                 "graph.contradiction | score below gate — skipping | "
-                "pair=({}, {}) score={:.4f}",
+                "pair=(%s, %s) score=%.4f",
                 id_a, id_b, score,
             )
             continue
@@ -218,7 +218,7 @@ def _find_contradictions(
 
 
 # ---------------------------------------------------------------------------
-# KuzuDB + DuckDB persistence helpers
+# FalkorDB + DuckDB persistence helpers
 # ---------------------------------------------------------------------------
 
 
@@ -283,14 +283,14 @@ async def _update_contradicted_by(
 
     DuckDB does not have a native list-append; we read, modify, write back.
     All failures are logged at WARNING — a DuckDB update failure is non-fatal
-    for the ContradictionEvent itself (already written to KuzuDB).
+    for the ContradictionEvent itself (already written to FalkorDB).
     """
     try:
         existing = duckdb_store.get_memory(loser_memory_id)
         if existing is None:
             logger.warning(
                 "graph.contradiction | memory not found in DuckDB — "
-                "contradicted_by not updated | memory_id={}",
+                "contradicted_by not updated | memory_id=%s",
                 loser_memory_id,
             )
             return
@@ -307,7 +307,7 @@ async def _update_contradicted_by(
     except Exception as exc:
         logger.warning(
             "graph.contradiction | DuckDB contradicted_by update failed | "
-            "memory_id={} event_id={} | error={}",
+            "memory_id=%s event_id=%s | error=%s",
             loser_memory_id, event_id, exc,
         )
 
@@ -320,8 +320,9 @@ async def _update_contradicted_by(
 async def detect_and_flag(
     new_memory: Any,
     existing_memories: Sequence[Any],
-    kuzu_store: "FalkorDBStore",
-    duckdb_store: "DuckDBStore",
+    graph_store: "FalkorDBStore" | None = None,
+    duckdb_store: "DuckDBStore" | None = None,
+    **kwargs: Any,
 ) -> list[ContradictionResult]:
     """
     Check a newly ingested SemanticMemory against existing active memories
@@ -334,7 +335,7 @@ async def detect_and_flag(
     new_memory        : the freshly ingested SemanticMemory
     existing_memories : active SemanticMemory objects for the same agent,
                         pre-filtered by entity if possible for efficiency
-    kuzu_store        : open KuzuDBStore instance
+    graph_store       : open FalkorDBStore instance
     duckdb_store      : open DuckDBStore instance
 
     Returns
@@ -342,19 +343,25 @@ async def detect_and_flag(
     List of ContradictionResult objects persisted during this call.
     Empty list when no contradictions found.
     """
+    target_graph = graph_store or kwargs.get("kuzu_store")
+    if duckdb_store is None:
+        duckdb_store = kwargs.get("duckdb")  # type: ignore
+
     candidates = [m for m in existing_memories if _is_active(m)]
     candidates_plus_new = [new_memory] + candidates
 
     contradictions = _find_contradictions(candidates_plus_new)
 
     for event in contradictions:
-        await _write_contradiction_event(kuzu_store, event)
-        await _update_contradicted_by(duckdb_store, event.memory_id_b, event.event_id)
+        if target_graph is not None:
+            await _write_contradiction_event(target_graph, event)
+        if duckdb_store is not None:
+            await _update_contradicted_by(duckdb_store, event.memory_id_b, event.event_id)
 
     if contradictions:
         logger.info(
             "graph.contradiction | detect_and_flag | "
-            "memory_id={} contradictions_found={}",
+            "memory_id=%s contradictions_found=%d",
             str(getattr(new_memory, "memory_id", "?")),
             len(contradictions),
         )
@@ -364,8 +371,9 @@ async def detect_and_flag(
 
 async def detect_for_cluster(
     cluster_memories: Sequence[Any],
-    kuzu_store: "FalkorDBStore",
-    duckdb_store: "DuckDBStore",
+    graph_store: "FalkorDBStore" | None = None,
+    duckdb_store: "DuckDBStore" | None = None,
+    **kwargs: Any,
 ) -> list[ContradictionResult]:
     """
     Run contradiction detection across all SemanticMemory objects in a
@@ -375,7 +383,7 @@ async def detect_for_cluster(
 
     All pairwise combinations within the cluster are checked. Only ACTIVE
     memories with non-empty entity and relation fields are considered.
-    ContradictionEvent nodes are written to KuzuDB and contradicted_by
+    ContradictionEvent nodes are written to FalkorDB and contradicted_by
     lists updated in DuckDB.
 
     Parameters
@@ -383,13 +391,17 @@ async def detect_for_cluster(
     cluster_memories : all memories in the cluster (may include non-Semantic
                        types — they are silently skipped via _spo() returning
                        empty strings)
-    kuzu_store       : open KuzuDBStore instance
+    graph_store      : open FalkorDBStore instance
     duckdb_store     : open DuckDBStore instance
 
     Returns
     -------
     List of ContradictionResult objects persisted during this call.
     """
+    target_graph = graph_store or kwargs.get("kuzu_store")
+    if duckdb_store is None:
+        duckdb_store = kwargs.get("duckdb")  # type: ignore
+
     # Filter to SemanticMemory only — others have no SPO fields.
     semantic = [
         m for m in cluster_memories
@@ -403,12 +415,14 @@ async def detect_for_cluster(
     contradictions = _find_contradictions(semantic)
 
     for event in contradictions:
-        await _write_contradiction_event(kuzu_store, event)
-        await _update_contradicted_by(duckdb_store, event.memory_id_b, event.event_id)
+        if target_graph is not None:
+            await _write_contradiction_event(target_graph, event)
+        if duckdb_store is not None:
+            await _update_contradicted_by(duckdb_store, event.memory_id_b, event.event_id)
 
     logger.info(
         "graph.contradiction | detect_for_cluster | "
-        "cluster_size={} semantic_count={} contradictions_found={}",
+        "cluster_size=%d semantic_count=%d contradictions_found=%d",
         len(cluster_memories),
         len(semantic),
         len(contradictions),
@@ -420,8 +434,9 @@ async def detect_for_cluster(
 async def flag_correction(
     superseded_memory: Any,
     corrected_memory: Any,
-    kuzu_store: "FalkorDBStore",
-    duckdb_store: "DuckDBStore",
+    graph_store: "FalkorDBStore" | None = None,
+    duckdb_store: "DuckDBStore" | None = None,
+    **kwargs: Any,
 ) -> ContradictionResult | None:
     """
     Handle CORRECTION feedback signal.
@@ -436,20 +451,24 @@ async def flag_correction(
     superseded_memory : the original memory being corrected (will be archived
                         by feedback_collector after this call)
     corrected_memory  : the new memory ingested from the correction signal
-    kuzu_store        : open KuzuDBStore instance
+    graph_store       : open FalkorDBStore instance
     duckdb_store      : open DuckDBStore instance
 
     Returns
     -------
     ContradictionResult if an event was created, None otherwise.
     """
+    target_graph = graph_store or kwargs.get("kuzu_store")
+    if duckdb_store is None:
+        duckdb_store = kwargs.get("duckdb")  # type: ignore
+
     sup_id = str(getattr(superseded_memory, "memory_id", ""))
     cor_id = str(getattr(corrected_memory, "memory_id", ""))
 
     if not sup_id or not cor_id:
         logger.warning(
             "graph.contradiction | flag_correction called with missing "
-            "memory_id | superseded={} corrected={}", sup_id, cor_id,
+            "memory_id | superseded=%s corrected=%s", sup_id, cor_id,
         )
         return None
 
@@ -472,12 +491,14 @@ async def flag_correction(
         score=max(score, CONTRADICTION_SCORE_GATE),  # floor at gate for corrections
     )
 
-    await _write_contradiction_event(kuzu_store, event)
-    await _update_contradicted_by(duckdb_store, sup_id, event.event_id)
+    if target_graph is not None:
+        await _write_contradiction_event(target_graph, event)
+    if duckdb_store is not None:
+        await _update_contradicted_by(duckdb_store, sup_id, event.event_id)
 
     logger.info(
         "graph.contradiction | flag_correction | "
-        "superseded={} corrected={} event_id={}",
+        "superseded=%s corrected=%s event_id=%s",
         sup_id, cor_id, event.event_id,
     )
     return event

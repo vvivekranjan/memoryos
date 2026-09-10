@@ -6,7 +6,7 @@ AIMemoryOS combines vector retrieval, graph knowledge bases, and highly-durable 
 
 ## Features
 
-- **Multi-Store Architecture**: Coordinated state across SQLite (append-only events), DuckDB (canonical relational state), FAISS (vector similarity), and KuzuDB (graph relationships).
+- **Multi-Store Architecture**: Coordinated state across SQLite (append-only events), DuckDB (canonical relational state), FAISS (vector similarity), and FalkorDB (graph relationships).
 - **Advanced Ingestion**: End-to-end pipeline with preprocessing, PII stripping, SHA-256 deduplication, and semantic chunking.
 - **Rich Retrieval**: Context assembly from multiple sources, reranking, and trace scoring.
 - **Coordinated Pruning**: Safely `forget()` memories with guaranteed cleanup across all storage backends without violating relational integrity.
@@ -122,7 +122,7 @@ For those interested in extending the SDK or contributing, the folder architectu
 - `retrieval/`: Similarity search, vector reranking, and `ContextBuilder` logic.
 - `storage/`: Highly durable persistence backends (`duckdb_store.py`, `faiss_store.py`, `sqlite_log.py`) and the `orchestrator.py`.
 - `vector/`: Embedding generation (`sentence-transformers`) and model management.
-- `graph/`: KuzuDB ontology and schema definitions.
+- `graph/`: FalkorDB ontology and schema definitions.
 
 ## Contributing
 

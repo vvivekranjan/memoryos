@@ -114,7 +114,7 @@ class BaseMemory(BaseModel):
     source_ids: list[UUID] = Field(default_factory=list) # parent memory IDs
 
     # Graph
-    graph_node_id: Optional[str] = None # KuzuDB node identifier
+    graph_node_id: Optional[str] = None  # FalkorDB node identifier
 
     # Extensible
     tags: list[str] = Field(default_factory=list)
