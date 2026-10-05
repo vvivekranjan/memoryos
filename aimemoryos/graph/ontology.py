@@ -7,7 +7,8 @@ from typing import Any
 
 try:
     from falkordb import FalkorDB
-    from falkordb.asyncio import FalkorDB as AsyncFalkorDB, AsyncGraph
+    from falkordb.asyncio import FalkorDB as AsyncFalkorDB
+    from falkordb.asyncio.graph import AsyncGraph
 except ImportError:  # pragma: no cover
     FalkorDB = None  # type: ignore
     AsyncFalkorDB = None  # type: ignore
@@ -44,62 +45,32 @@ class FalkorDBStore:
         self.graph: AsyncGraph | None = None
         self._initialised = False
 
-    async def initialise_async(self) -> None:
-        """Connect to FalkorDB and bootstrap graph indices asynchronously."""
-        if self._initialised:
-            return
-
-        if AsyncFalkorDB is None:
-            logger.warning(
-                "graph.falkordb_store | falkordb package not installed; graph operations will fail."
-            )
-            return
-
-        try:
-            if self.url:
-                self.client = AsyncFalkorDB.from_url(self.url)
-            else:
-                self.client = AsyncFalkorDB(
-                    host=self.host,
-                    port=self.port,
-                    password=self.password,
-                    ssl=self.ssl,
-                    socket_timeout=self.timeout,
-                    socket_connect_timeout=self.timeout,
-                )
-            self.graph = self.client.select_graph(self.graph_name)
-
-            for index_cypher in (
-                "CREATE INDEX ON :Entity(node_id)",
-                "CREATE INDEX ON :Entity(entity_type)",
-                "CREATE INDEX ON :ContradictionEvent(event_id)",
-            ):
-                try:
-                    await self.graph.query(index_cypher)
-                except Exception as idx_exc:
-                    logger.debug(
-                        "graph.falkordb_store | async index creation notice | query=%s | info=%s",
-                        index_cypher,
-                        idx_exc,
-                    )
-
-            self._initialised = True
-            logger.info(
-                "graph.falkordb_store | AsyncFalkorDB initialised at %s:%s (graph=%s)",
-                self.host,
-                self.port,
-                self.graph_name,
-            )
-        except Exception as exc:
-            logger.error(
-                "graph.falkordb_store | AsyncFalkorDB connection failed | error=%s",
-                exc,
-            )
-
-    ainitialise = initialise_async
+    #: Range indexes bootstrapped on first connect. Current FalkorDB Cypher
+    #: syntax ("CREATE INDEX FOR (n:Label) ON (n.prop)"); accelerates the
+    #: equality lookups used throughout this store (MERGE/MATCH by node_id).
+    _INDEX_STATEMENTS: tuple[str, ...] = (
+        "CREATE INDEX FOR (n:Entity) ON (n.node_id)",
+        "CREATE INDEX FOR (n:Entity) ON (n.entity_type)",
+        "CREATE INDEX FOR (n:ContradictionEvent) ON (n.event_id)",
+    )
 
     def initialise(self) -> None:
-        """Connect to FalkorDB and bootstrap graph indices synchronously."""
+        """
+        Connect to FalkorDB and bootstrap graph indices. Idempotent.
+
+        Two clients are created deliberately:
+          - a short-lived sync client, used only to create indices
+            (the async client's query() returns a coroutine and cannot
+            be awaited outside an event loop, which this method is not in).
+          - the long-lived async client (self.client/self.graph), used for
+            all subsequent read/write queries via the async methods below.
+
+        Note: falkordb's client constructors (sync AND async) perform a
+        blocking connection check at construction time to detect cluster
+        mode. There is no truly non-blocking variant in the underlying
+        library, so a separate async-native initialiser would provide no
+        real benefit — this single method covers both call sites.
+        """
         if self._initialised:
             return
 
@@ -110,11 +81,8 @@ class FalkorDBStore:
             return
 
         try:
-            # Sync initialization for indices
-            if self.url:
-                sync_client = FalkorDB.from_url(self.url)
-            else:
-                sync_client = FalkorDB(
+            sync_client = (
+                FalkorDB.from_url(self.url) if self.url else FalkorDB(
                     host=self.host,
                     port=self.port,
                     password=self.password,
@@ -122,25 +90,21 @@ class FalkorDBStore:
                     socket_timeout=self.timeout,
                     socket_connect_timeout=self.timeout,
                 )
+            )
             sync_graph = sync_client.select_graph(self.graph_name)
-            for index_cypher in (
-                "CREATE INDEX ON :Entity(node_id)",
-                "CREATE INDEX ON :Entity(entity_type)",
-                "CREATE INDEX ON :ContradictionEvent(event_id)",
-            ):
+            for index_cypher in self._INDEX_STATEMENTS:
                 try:
                     sync_graph.query(index_cypher)
                 except Exception as idx_exc:
+                    # Already exists, or server lacks the feature — non-fatal.
                     logger.debug(
-                        "graph.falkordb_store | sync index creation notice | info=%s",
+                        "graph.falkordb_store | index creation notice | query=%s | info=%s",
+                        index_cypher,
                         idx_exc,
                     )
 
-            # Setup async client for runtime queries
-            if self.url:
-                self.client = AsyncFalkorDB.from_url(self.url)
-            else:
-                self.client = AsyncFalkorDB(
+            self.client = (
+                AsyncFalkorDB.from_url(self.url) if self.url else AsyncFalkorDB(
                     host=self.host,
                     port=self.port,
                     password=self.password,
@@ -148,6 +112,7 @@ class FalkorDBStore:
                     socket_timeout=self.timeout,
                     socket_connect_timeout=self.timeout,
                 )
+            )
             self.graph = self.client.select_graph(self.graph_name)
 
             self._initialised = True
@@ -177,13 +142,6 @@ class FalkorDBStore:
     def close(self) -> None:
         """Close connection synchronously."""
         self._initialised = False
-
-    async def __aenter__(self) -> "FalkorDBStore":
-        await self.initialise_async()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        await self.aclose()
 
     async def _query_ro(
         self, cypher: str, params: dict[str, Any] | None = None

@@ -160,7 +160,7 @@ class MemoryClient:
           2. Deduplicate — SHA-256 gate before any embedding compute
           3. Chunk       — semantic sentence-boundary split
           4. Embed       — sentence-transformers inference
-          5. Store       — SQLite → DuckDB → FAISS → KuzuDB (orchestrator)
+          5. Store       — SQLite → DuckDB → FAISS → FalkorDB (orchestrator)
 
         Duplicate content (SHA-256 match) is silently dropped and returns
         IngestResult(duplicate_detected=True, memory_ids=[], chunks_created=0).
@@ -380,7 +380,7 @@ class MemoryClient:
 
     async def forget(self, *, memory_id: str) -> None:
         """
-        Remove a memory across DuckDB, FAISS, and KuzuDB.
+        Remove a memory across DuckDB, FAISS, and FalkorDB.
 
         Deferred until coordinated multi-store deletion is implemented.
         Must write a MEMORY_PRUNED SQLite event before any store delete

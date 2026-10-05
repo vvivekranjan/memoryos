@@ -272,7 +272,7 @@ class GraphRetriever:
 
         Note: BFS seeds must be node_ids (entity labels or memory_ids), NOT
         raw query text. query_text is passed as-is as a fallback entity label
-        because KuzuDB Entity.node_id = normalised entity label, and a short
+        because FalkorDB Entity.node_id = normalised entity label, and a short
         query ("Alice", "Python") is often a valid entity label. Longer queries
         will produce no matching seed node, returning an empty result — which
         is correct behaviour, not an error.
@@ -281,7 +281,7 @@ class GraphRetriever:
             return [s for s in seed_memory_ids if s]
 
         # Fallback: normalise query_text as an entity label seed.
-        # KuzuDB Entity.node_id is lowercased + whitespace-normalised. Match that normalisation here.
+        # FalkorDB Entity.node_id is lowercased + whitespace-normalised. Match that normalisation here.
         normalised = query_text.strip().lower()
         if normalised:
             return [normalised]

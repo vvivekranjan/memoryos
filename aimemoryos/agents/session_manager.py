@@ -60,7 +60,7 @@ class SessionManager:
 
     Does NOT:
     - retrieve memories from any store
-    - access FAISS, DuckDB, KuzuDB, or SQLite
+    - access FAISS, DuckDB, FalkorDB, or SQLite
     - replay events
     - enforce FAISS write guards (that is StorageOrchestrator's job)
     """

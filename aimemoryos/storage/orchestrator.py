@@ -460,7 +460,7 @@ class StorageOrchestrator:
         except Exception as exc:
             logger.warning("storage.orchestrator | faiss deletion failed | memory_id=%s | error=%s", memory_id, exc)
 
-        # Step 4: Delete from KuzuDB
+        # Step 4: Delete from FalkorDB
         if self.graph is not None:
             try:
                 await self.graph.delete_memory(str(memory_id))
