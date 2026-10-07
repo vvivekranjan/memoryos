@@ -13,7 +13,7 @@ class SpreadingActivation:
 
     # def propagate(memory_id: UUID, depth: int = 2):
     #     for hop in range(1, depth + 1):
-    #         neighbours = kuzu.bfs(memory_id, hops=hop)
+    #         neighbours = graph_store.bfs(memory_id, hops=hop)
     #         boost = DECAY_PER_HOP ** hop
     #         for n in neighbours:
     #             session_activation[n.memory_id] += boost

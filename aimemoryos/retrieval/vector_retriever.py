@@ -79,10 +79,7 @@ class VectorRetriever:
         results: List[SearchResult] = await self.faiss_store.search_async(
             query_embedding=query_embedding,
             top_k=top_k,
-            agent_id=agent_id,
-            memory_types=memory_types,
             lifecycle_states=lifecycle_states,
-            min_importance=min_importance,
         )
 
         candidates: list[VectorCandidate] = []
